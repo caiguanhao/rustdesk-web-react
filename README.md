@@ -61,6 +61,11 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   secretbox 小端计数 nonce（从 1 开始，收发独立，MAC 失败后密码器失效）、
   `SHA256(password||salt)` + `SHA256(h1||challenge)`；固定向量见
   `tests/crypto.test.ts`。
+- `src/protocol/secure.ts`：relay 安全握手（kx_version 0）——验证 hbbs 签名的
+  `IdPk`、再验证 peer `SignedId`、发送 sealed secretbox key 并安装计数
+  secretbox；18s 时限，默认 fail-closed，`allowInsecureFallback` 时按 v1 发送
+  空 `PublicKey` 并返回降级原因。错误码区分 server key 缺失/无效、peer 签名
+  无效、id 不匹配、密钥长度；mock peer 双向加密验证见 `tests/secure.test.ts`。
 
 ## 开发
 
