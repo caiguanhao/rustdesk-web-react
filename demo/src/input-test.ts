@@ -3,9 +3,14 @@
 // attaches MouseInput/KeyboardInput with recording channels, and exposes the
 // recorded wire messages for assertions.
 import { VP9_FIXTURES } from '../../test-fixtures/vp9';
+import { ImeInput, type ViewportInfo } from '../../src/input/ime';
 import { KeyboardInput } from '../../src/input/keyboard';
 import { MouseInput } from '../../src/input/mouse';
-import type { KeyEvent } from '../../src/protocol/message';
+import type {
+  DeepPartial,
+  KeyEvent,
+  Message,
+} from '../../src/protocol/message';
 import {
   bytesFromBase64,
   createCheckDecoder,
@@ -34,6 +39,10 @@ export interface InputTestApi {
   setKeyboardEnabled(enabled: boolean): void;
   sendCtrlAltDel(): void;
   sendLockScreen(): void;
+  focusIme(): boolean;
+  setImeEnabled(enabled: boolean): void;
+  imeFocused: boolean;
+  viewport?: ViewportInfo;
   lastContextMenuPrevented?: boolean;
   lastKeyDownPrevented?: boolean;
 }
@@ -51,20 +60,33 @@ if (!stageElement) throw new Error('input test: #stage is missing');
 const stage: HTMLElement = stageElement;
 const { canvas, renderer } = mountRenderer(stage);
 
-const keyboard = new KeyboardInput({
-  channel: {
-    sendMessage(payload) {
-      if (payload.key_event) keys.push(payload.key_event as KeyEvent);
-    },
+const recordKey = {
+  sendMessage(payload: DeepPartial<Message>) {
+    if (payload.key_event) keys.push(payload.key_event as KeyEvent);
   },
+};
+
+const keyboard = new KeyboardInput({
+  channel: recordKey,
   platform: 'Windows',
   target: document,
+});
+
+const ime = new ImeInput({
+  channel: recordKey,
+  onFocusChange: (focused) => {
+    api.imeFocused = focused;
+  },
+  onViewportChange: (viewport) => {
+    api.viewport = viewport;
+  },
 });
 
 const api: InputTestApi = {
   ready: false,
   messages,
   keys,
+  imeFocused: false,
   clear: () => {
     messages.length = 0;
   },
@@ -80,6 +102,8 @@ const api: InputTestApi = {
   setKeyboardEnabled: (enabled) => keyboard.setEnabled(enabled),
   sendCtrlAltDel: () => keyboard.sendCtrlAltDel(),
   sendLockScreen: () => keyboard.sendLockScreen(),
+  focusIme: () => ime.focus(),
+  setImeEnabled: (enabled) => ime.setEnabled(enabled),
 };
 window.inputTest = api;
 
@@ -114,6 +138,7 @@ async function start(): Promise<void> {
 
   mouse.attach();
   keyboard.attach();
+  ime.attach();
   // Registered after KeyboardInput so it observes its preventDefault call.
   document.addEventListener('keydown', (event) => {
     api.lastKeyDownPrevented = event.defaultPrevented;

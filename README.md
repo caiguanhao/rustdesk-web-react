@@ -199,7 +199,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 3 个 Playwright 测试：
+  Chromium/Chrome，当前跑 4 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -207,7 +207,9 @@ npm run dev          # demo，http://localhost:5173
   2. `demo/input-test.html` 用真实浏览器鼠标验证 mask/坐标/右键菜单/滚轮/
      拖拽（P3-1）；
   3. 同一页面用真实 `page.keyboard` 验证物理键码、修饰键、repeat、平台切换
-     与 CtrlAltDel/LockScreen（P3-2）。
+     与 CtrlAltDel/LockScreen（P3-2）；
+  4. 同一页面验证隐藏 textarea 的 insertText、合成 composition、paste、
+     visualViewport 通知，以及 IME 聚焦时物理键仍走 Map 模式（P3-3）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -284,6 +286,38 @@ npm run dev          # demo，http://localhost:5173
 - ⏳ 真机待验：真实桌面快捷键（尤其浏览器/OS 保留键）、IME 与 Android Map
   仍需真实对端。与 P3-1 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），
   按规则未重复发通知；P3-2 暂不勾选。
+
+## IME / 软键盘（P3-3，⏳ 真机待验）
+
+- `src/input/ime.ts` 的 `ImeInput` 管理一个隐藏 textarea：1×1、opacity 0、
+  fixed、`font-size:16px`（避免 iOS 自动缩放），不用 `display:none`；
+  `focus({preventScroll:true})` 只在用户手势（P4-3 的键盘按钮/点按）调用，
+  避免软键盘弹出时滚动画面。P4-3 应把 `container` 设为 viewer 根节点，并在
+  焦点门控中把该 textarea 视为“viewer 仍有焦点”，否则聚焦 IME 会错误禁用
+  P3-2 的物理键盘。
+- 组合输入：`compositionend` 发送
+  `KeyEvent{seq, mode: Translate, down:true, press:false}`；`input` 在
+  composition 期间忽略，compositionend 后同步到达的尾随 input 用 0ms 抑制
+  窗口去重。普通输入（软键盘/insertText/表情等）在非 composing 时按
+  `input.data`/textarea 值发送 seq 并清空。P3-2 的 KeyboardInput 对
+  `isComposing`/229/Process 不发送也不拦截，物理键在 IME 聚焦时仍走 Map。
+- `paste` 同步读取 `clipboardData` 文本并发送 seq，同时
+  `preventDefault`/`stopPropagation`，避免插入隐藏 textarea 或与未来
+  document 级 P3-5 粘贴处理重复发送。P3-5 仍需按规范优先尝试
+  `Clipboard{format:Text}`，并注意不要重复处理该事件。
+- `onViewportChange` 在 `visualViewport` resize/scroll 与 window resize 时
+  上报 `{width,height,offsetTop,offsetLeft,scale}`（相同值去重），供 P4-3
+  在软键盘弹出时调整布局；无 `visualViewport` 时回退 `innerWidth/Height`。
+- 验证：`tests/input-ime.test.ts`（13 项 jsdom：textarea 样式、plain input、
+  composition 顺序/去重、paste、focus/blur、禁用/卸载、viewport、错误）、
+  `tests/input-ime-integration.test.ts`（Node 假 DOM + 真实 mock 加密链路
+  的 3 条 seq）、`tests/e2e/ime.spec.ts`（真实浏览器 insertText、合成
+  composition、paste、viewport、禁用/启用，以及 IME 聚焦时物理 KeyA/
+  Backspace 只发 Map 不发 seq）。
+- ⏳ 真机待验：真实 iOS/Android 中文输入、软键盘 Backspace/Enter、组合
+  结束时序（尾随 input 若在 0ms 后到达可能重复）与 visualViewport 布局需要
+  真机。与 P3-1/P3-2 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按
+  规则未重复发通知；P3-3 暂不勾选。
 
 ## 本机 Docker 真连环境（P1-9）
 
