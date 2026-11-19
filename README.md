@@ -113,6 +113,19 @@ npm run dev        # demo，http://localhost:5173
 
 部分目录由后续任务（P0/P1）创建。
 
+## 视频解码（P2-1）
+
+- `src/media/vp9-decoder.ts`：从 `assetBaseUrl` 加载 ogv.js，用
+  `wasm-feature-detect` 选择 SIMD（`OGVDecoderVideoVP9SIMDW`）或非 SIMD
+  （`OGVDecoderVideoVP9W`）；SIMD 失败时自动回退非 SIMD。worker 解码、
+  `threading:false`（不依赖 SharedArrayBuffer），加载/初始化 15s 超时。
+- `Vp9Decoder.create()` 串行处理 `processFrame`；`decode()` 返回 YUV frame，
+  绘制后必须 `recycle(frame)`；`rebuild()` 用于分辨率/WebGL context 变化
+  （ogv 1.8.6 的 `close()` 是 no-op），`dispose()` 丢弃实例。
+- 浏览器验收：`npm run test:decoder`（需要本机 Chrome）在 headless Chrome
+  中用两套真实 WASM 各解码 200 个 VP9 keyframe；测试页面为
+  `demo/decoder-check.html`。
+
 ## 本机 Docker 真连环境（P1-9）
 
 不依赖用户现有服务器/客户端，也不使用用户已安装的 RustDesk 配置：

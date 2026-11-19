@@ -35,6 +35,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:real": "bash scripts/test-real-server.sh",
+    "test:decoder": "node scripts/check-decoders.mjs",
     "dev:server": "bash scripts/dev-server.sh",
     "dev:peer": "tsx scripts/controlled-peer.ts",
     "log-server": "node scripts/event-log-server.mjs",

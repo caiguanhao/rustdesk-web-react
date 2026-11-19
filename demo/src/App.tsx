@@ -22,16 +22,6 @@ interface DecoderManifest {
   files: ManifestFile[];
 }
 
-interface OgvLoaderGlobal {
-  base: string;
-}
-
-declare global {
-  interface Window {
-    OGVLoader?: OgvLoaderGlobal;
-  }
-}
-
 interface AssetCheckResult {
   base: string;
   version: string;
@@ -63,30 +53,10 @@ async function fetchOk(url: string, signal: AbortSignal): Promise<Response> {
   return response;
 }
 
-/** Load the real ogv loader (P2-1 will drive its decoder classes) and point it at `base`. */
+/** Load the real ogv loader and point it at `base`. */
 async function loadOgvLoader(base: string, signal: AbortSignal): Promise<void> {
-  if (!window.OGVLoader) {
-    await new Promise<void>((resolve, reject) => {
-      const script = document.createElement('script');
-      const onAbort = () => script.remove();
-      script.src = assetUrl(base, 'ogv.js');
-      script.async = true;
-      script.onload = () => {
-        signal.removeEventListener('abort', onAbort);
-        resolve();
-      };
-      script.onerror = () => {
-        signal.removeEventListener('abort', onAbort);
-        reject(new Error('ogv.js failed to load'));
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-      document.head.append(script);
-    });
-  }
-  if (!window.OGVLoader) {
-    throw new Error('ogv.js loaded but window.OGVLoader is missing');
-  }
-  window.OGVLoader.base = base;
+  const { loadOgvJs } = await import('../../src/media/vp9-decoder');
+  await loadOgvJs(base, 15_000, signal);
 }
 
 async function checkAssets(assetBaseUrl: string, signal: AbortSignal): Promise<AssetCheckResult> {
