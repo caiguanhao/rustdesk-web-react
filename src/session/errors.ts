@@ -10,6 +10,8 @@ export type RustDeskErrorCode =
   | 'invalid-config'
   /** Caller aborted via `AbortSignal` or disposed the session. */
   | 'aborted'
+  /** A WebSocket open or next-message wait exceeded its deadline. */
+  | 'timeout'
   /** WebSocket could not open before the timeout. */
   | 'server-unreachable'
   /** hbbs refused the punch-hole/relay request (`refuse_reason`). */

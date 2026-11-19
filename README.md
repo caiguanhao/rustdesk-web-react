@@ -52,6 +52,10 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   （HTTPS 反代路径 `/ws/id`、`/ws/relay`；显式端口 +2 / relay +3 或 +2），
   并校验 `rendezvousUrl`/`relayUrl` 显式覆盖（仅 `ws(s)://`、HTTPS 页面禁止
   `ws://`）。
+- `src/protocol/websock.ts`：二进制帧传输（一条 WS 消息 = 一个完整 protobuf，
+  无长度前缀），Promise 队列 + open/next 超时，关闭码 1009 映射为
+  `message-too-large`；`setCipher` 供 P1-5 安装 secretbox（只作用于
+  `Message`，不含 rendezvous 帧）。
 
 ## 开发
 
