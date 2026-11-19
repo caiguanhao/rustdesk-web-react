@@ -21,6 +21,10 @@ node_modules/
 dist/
 coverage/
 
+# Playwright artifacts
+test-results/
+playwright-report/
+
 # Demo copies of decoder assets (source of truth: assets/ogv/, `npm run copy-assets`)
 demo/public/rustdesk-assets/
 

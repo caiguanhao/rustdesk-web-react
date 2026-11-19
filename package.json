@@ -36,6 +36,7 @@
     "test:watch": "vitest",
     "test:real": "bash scripts/test-real-server.sh",
     "test:decoder": "node scripts/check-decoders.mjs",
+    "test:canvas": "playwright test",
     "dev:server": "bash scripts/dev-server.sh",
     "dev:peer": "tsx scripts/controlled-peer.ts",
     "log-server": "node scripts/event-log-server.mjs",
@@ -56,6 +57,7 @@
     "zstddec": "0.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
     "@types/node": "26.6.6",

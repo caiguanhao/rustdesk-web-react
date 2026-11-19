@@ -94,8 +94,10 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
 npm install
 npm run typecheck  # tsc strict 检查（不产出文件）
 npm run build      # Vite library mode + tsc 类型声明 → dist/
-npm run test       # Vitest
-npm run dev        # demo，http://localhost:5173
+npm run test         # Vitest
+npm run test:canvas  # Playwright 画布测试（需 Chrome 或 npx playwright install chromium）
+npm run test:decoder # headless Chrome 解码器/渲染检查（需本机 Chrome）
+npm run dev          # demo，http://localhost:5173
 ```
 
 - 相对导入在 `src/` 内使用显式 `.js` 后缀（编译到 `.d.ts` 后兼容 NodeNext 消费者）。
@@ -193,6 +195,24 @@ npm run dev        # demo，http://localhost:5173
   display 丢帧、在途帧不绘制、分辨率重建、入站 switch、重建失败、隐藏暂停；
   `tests/mock-server.test.ts` 通过真实 mock hbbs/hbbr/peer 验证切换与分辨率
   恢复；`tests/peer-info.test.ts` 覆盖下标 clamp 与 display 列表合并。
+
+## Playwright 画布测试（P2-5）
+
+- `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
+  Chromium/Chrome，加载 `demo/canvas-test.html`：解码
+  `test-fixtures/vp9.ts` 的 red/green 64x64 无损 VP9 keyframe，通过
+  `VideoRenderer` 绘制，读回 canvas 像素（红/绿）证明非空，验证 640x360
+  与 360x640 容器下的 letterbox 几何（360x360、偏移 140），并输出 64x64
+  解码+绘制微基准 FPS（非远端视频吞吐）。
+- `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5 页面共用的状态、base64、
+  像素回读、快照与 decoder 工厂；`demo/src/decoder-check.ts` 也使用该模块
+  与共享 fixture。
+- 浏览器选择：优先使用本机 Google Chrome；可用 `CHROME_BIN` 指定其他路径。
+  CI 上没有 Chrome 时先运行 `npx playwright install chromium`；
+  `npm run test:canvas` 本身不需要网络。
+- Playwright 产物 `test-results/`、`playwright-report/` 已 gitignore。该测试
+  需要浏览器，故不在 `npm test` 中；`npm run test:decoder` 仍用轻量 CDP
+  脚本验证两套 WASM 与 P2-3 渲染细节。真机触摸/输入测试仍属 P3/P5。
 
 ## 本机 Docker 真连环境（P1-9）
 

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>VP9 canvas check</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #eee;
+        font: 12px/1.4 monospace;
+      }
+      #stage {
+        width: 640px;
+        height: 360px;
+        background: #000;
+      }
+      #status {
+        margin: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <p id="status">loading…</p>
+    <script type="module" src="/src/canvas-test.ts"></script>
+  </body>
+</html>

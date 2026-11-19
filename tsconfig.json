@@ -27,7 +27,9 @@
     "src",
     "tests",
     "demo/src",
+    "test-fixtures",
     "demo/vite.config.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "playwright.config.ts"
   ]
 }

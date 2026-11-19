@@ -20,3 +20,20 @@ JSONL file is gitignored. Serving the page over HTTP (for example
 `python3 -m http.server 8080 -d test-fixtures`) is recommended for clipboard
 API permissions; `file://` still supports the event log and keyboard/mouse
 tests.
+
+# VP9 canvas fixtures
+
+`vp9.ts` holds raw VP9 keyframes (base64) used by the browser check pages and
+the Playwright canvas test. To regenerate one fixture:
+
+```bash
+ffmpeg -f lavfi -i color=c=green:size=64x64:rate=10 -frames:v 1 \
+  -c:v libvpx-vp9 -lossless 1 -f ivf /tmp/green.ivf
+# Strip the 32-byte IVF file header and 12-byte frame header:
+node -e 'const b=require("fs").readFileSync("/tmp/green.ivf");console.log(b.subarray(44,44+b.readUInt32LE(32)).toString("base64"))'
+```
+
+The 64x64 size keeps the fixtures tiny; `demo/src/canvas-test.ts` resizes the
+container to verify letterboxing. Paste the base64 into `VP9_FIXTURES`; the
+Playwright test derives fixture names and dimensions from the same module.
+

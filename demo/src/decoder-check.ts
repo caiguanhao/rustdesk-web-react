@@ -2,33 +2,24 @@
 // Decodes one real 64x64 VP9 keyframe (ffmpeg libvpx-vp9, lossless) 200 times
 // with both WASM builds and recycles every frame, then decodes it once more and
 // draws it through yuv-canvas to verify the letterboxed renderer geometry.
-import { DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
-import { VideoRenderer, type RendererLayout } from '../../src/media/renderer';
-import { Vp9Decoder, frameSize } from '../../src/media/vp9-decoder';
+import { VP9_FIXTURES } from '../../test-fixtures/vp9';
+import { VideoRenderer } from '../../src/media/renderer';
+import { frameSize } from '../../src/media/vp9-decoder';
+import {
+  bytesFromBase64,
+  createCheckDecoder,
+  readPixel,
+  setStatus,
+  snapshot,
+} from './check-harness';
 
-// ffmpeg -f lavfi -i color=c=red:size=64x64:rate=10 -frames:v 1 \
-//   -c:v libvpx-vp9 -lossless 1 -f ivf frame.ivf
-const FRAME_BASE64 =
-  'gkmDQgAD8AP2ADgkHBgAAAAgAAB4uf///I14Ax////7PyHD////2yMAzNYhIAA==';
+const RED_FRAME = VP9_FIXTURES.find((frame) => frame.name === 'red-64x64');
+if (!RED_FRAME) throw new Error('test-fixtures/vp9.ts is missing red-64x64');
 
-const FRAME = Uint8Array.from(atob(FRAME_BASE64), (char) => char.charCodeAt(0));
+const FRAME = bytesFromBase64(RED_FRAME.keyframeBase64);
 const ITERATIONS = 200;
-const CHECK_TIMEOUT_MS = 20_000;
 
 type Mode = 'simd' | 'non-simd' | 'auto';
-
-function setStatus(text: string): void {
-  const status = document.getElementById('status');
-  if (status) status.textContent = text;
-}
-
-function createCheckDecoder(simd?: boolean): Promise<Vp9Decoder> {
-  return Vp9Decoder.create({
-    simd,
-    assetBaseUrl: DEFAULT_ASSET_BASE_URL,
-    timeoutMs: CHECK_TIMEOUT_MS,
-  });
-}
 
 function heapUsed(): number | null {
   const memory = (performance as unknown as { memory?: { usedJSHeapSize?: number } })
@@ -77,52 +68,6 @@ async function runDecoderCheck(mode: Mode): Promise<unknown> {
     heapAfter,
     heapDelta: heapBefore !== null && heapAfter !== null ? heapAfter - heapBefore : null,
   };
-}
-
-interface RendererSnapshot {
-  canvasWidth: number;
-  canvasHeight: number;
-  rectWidth: number;
-  rectHeight: number;
-  /** Canvas box relative to the container's top-left. */
-  offsetX: number;
-  offsetY: number;
-  layout: RendererLayout | null;
-}
-
-function snapshot(
-  canvas: HTMLCanvasElement,
-  container: HTMLElement,
-  renderer: VideoRenderer,
-): RendererSnapshot {
-  const rect = canvas.getBoundingClientRect();
-  const containerRect = container.getBoundingClientRect();
-  return {
-    canvasWidth: canvas.width,
-    canvasHeight: canvas.height,
-    rectWidth: rect.width,
-    rectHeight: rect.height,
-    offsetX: rect.left - containerRect.left,
-    offsetY: rect.top - containerRect.top,
-    layout: renderer.layout,
-  };
-}
-
-/** Read the top-left pixel back from the just-drawn WebGL canvas. */
-async function readPixel(canvas: HTMLCanvasElement): Promise<number[] | null> {
-  try {
-    const bitmap = await createImageBitmap(canvas);
-    const scratch = document.createElement('canvas');
-    scratch.width = 1;
-    scratch.height = 1;
-    const context = scratch.getContext('2d');
-    if (!context) return null;
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    return Array.from(context.getImageData(0, 0, 1, 1).data);
-  } catch {
-    return null;
-  }
 }
 
 async function runRendererCheck(): Promise<unknown> {

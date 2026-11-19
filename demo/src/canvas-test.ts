@@ -1,0 +1,113 @@
+// Playwright canvas acceptance (P2-5), driven by tests/e2e/canvas.spec.ts.
+// Decodes the pre-generated VP9 fixtures, draws them through VideoRenderer and
+// returns pixel samples, letterbox geometry and FPS stats to the test.
+import { VP9_FIXTURES } from '../../test-fixtures/vp9';
+import { VideoRenderer } from '../../src/media/renderer';
+import { frameSize } from '../../src/media/vp9-decoder';
+import {
+  bytesFromBase64,
+  createCheckDecoder,
+  readPixel,
+  setStatus,
+  snapshot,
+  type CanvasSnapshot,
+} from './check-harness';
+
+const ITERATIONS = 60;
+
+export interface CanvasFixtureResult {
+  name: string;
+  width: number;
+  height: number;
+  pixel: number[];
+}
+
+export interface CanvasCheckResult {
+  usingWebGL: boolean;
+  released: number;
+  frames: CanvasFixtureResult[];
+  first: CanvasSnapshot;
+  portrait: CanvasSnapshot;
+  /** 64x64 decode+draw microbenchmark, not remote-video throughput. */
+  fps: number;
+  fpsFrames: number;
+}
+
+declare global {
+  interface Window {
+    canvasTestReady?: boolean;
+    runCanvasTest?: () => Promise<CanvasCheckResult>;
+  }
+}
+
+async function runCanvasTest(): Promise<CanvasCheckResult> {
+  setStatus('loading decoder…');
+  const decoder = await createCheckDecoder();
+  const stage = document.getElementById('stage');
+  if (!stage) throw new Error('canvas test: #stage is missing');
+  stage.style.width = '640px';
+  stage.style.height = '360px';
+  stage.replaceChildren();
+
+  const canvas = document.createElement('canvas');
+  stage.append(canvas);
+  const renderer = new VideoRenderer(canvas, stage, { webGL: true });
+
+  let released = 0;
+  const drawFrame = async (value: Uint8Array) => {
+    const frame = await decoder.decode(value);
+    const size = frame ? frameSize(frame) : null;
+    if (!frame || !size) throw new Error('canvas test: frame did not decode');
+    renderer.draw(frame, () => {
+      released += 1;
+      decoder.recycle(frame);
+    });
+    return size;
+  };
+
+  setStatus('drawing fixtures…');
+  const encoded = VP9_FIXTURES.map((entry) => ({
+    entry,
+    bytes: bytesFromBase64(entry.keyframeBase64),
+  }));
+  const frames: CanvasFixtureResult[] = [];
+  for (const { entry, bytes } of encoded) {
+    const size = await drawFrame(bytes);
+    frames.push({
+      name: entry.name,
+      width: size.width,
+      height: size.height,
+      pixel: await readPixel(canvas),
+    });
+  }
+  const first = snapshot(canvas, stage, renderer);
+
+  stage.style.width = '360px';
+  stage.style.height = '640px';
+  renderer.resize();
+  const portrait = snapshot(canvas, stage, renderer);
+
+  const fpsFixture = encoded[0];
+  if (!fpsFixture) throw new Error('canvas test: no VP9 fixtures');
+  setStatus('measuring FPS…');
+  const started = performance.now();
+  for (let index = 0; index < ITERATIONS; index += 1) {
+    await drawFrame(fpsFixture.bytes);
+  }
+  const elapsedMs = performance.now() - started;
+  const fps = elapsedMs > 0 ? (ITERATIONS * 1000) / elapsedMs : 0;
+
+  setStatus(`done: ${frames.length} fixtures, ${fps.toFixed(1)} fps`);
+  return {
+    usingWebGL: renderer.usingWebGL,
+    released,
+    frames,
+    first,
+    portrait,
+    fps,
+    fpsFrames: ITERATIONS,
+  };
+}
+
+window.runCanvasTest = runCanvasTest;
+window.canvasTestReady = true;
