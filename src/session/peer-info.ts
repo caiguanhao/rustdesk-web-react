@@ -33,3 +33,26 @@ export interface PeerInfo {
   /** Whether the peer is in privacy mode. */
   privacyMode: boolean;
 }
+
+export function isDisplayIndex(index: number): boolean {
+  return Number.isInteger(index) && index >= 0;
+}
+
+/** Clamp a display index to a non-empty display list (falls back to 0). */
+export function clampDisplayIndex(index: number, displays: DisplayInfo[]): number {
+  return isDisplayIndex(index) && index < displays.length ? index : 0;
+}
+
+/**
+ * Merge a mid-session `Message.peer_info` sync. The peer sends the display
+ * list only and zeroes `current_display` for compatibility, so the local
+ * selection is preserved (and clamped if the list shrank).
+ */
+export function applyDisplayList(peer: PeerInfo, displays: DisplayInfo[]): PeerInfo {
+  if (displays.length === 0) return peer;
+  return {
+    ...peer,
+    displays,
+    currentDisplay: clampDisplayIndex(peer.currentDisplay, displays),
+  };
+}

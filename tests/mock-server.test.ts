@@ -11,12 +11,14 @@ import type { Vp9Frame } from '../src/media/vp9-decoder';
 import { VideoPipeline } from '../src/media/video-pipeline';
 import * as message from '../src/protocol/message';
 import { WebSock, type WebSocketLike, type WebSockCloseEvent } from '../src/protocol/websock';
+import type { PeerInfo } from '../src/session/peer-info';
 import type { RustDeskStatusEvent } from '../src/session/state';
 import {
   DEFAULT_IDLE_TIMEOUT_MS,
   DEFAULT_PAIRING_TIMEOUT_MS,
   MockRustDeskServer,
   waitFor,
+  type MockRustDeskOptions,
 } from './mocks/rustdesk-mock';
 
 // P1-8 acceptance: one mock process plays hbbs + hbbr + the controlled peer.
@@ -41,6 +43,102 @@ function connectionOptions(
     createSocket,
     ...overrides,
   };
+}
+
+const DEFAULT_VIDEO_SIZES = new Map([
+  [1, { width: 1920, height: 1080 }],
+  [2, { width: 1280, height: 720 }],
+]);
+
+interface VideoSession {
+  mock: MockRustDeskServer;
+  connection: RelayConnection;
+  pipeline: VideoPipeline;
+  peerInfo: PeerInfo;
+  stats: { decoded: number[]; rebuilds: number };
+  close(): Promise<void>;
+}
+
+/** Connect + login + a fake-size decoder/pipeline fed by the relay. */
+async function startVideoSession(
+  mockOptions: MockRustDeskOptions,
+  options: {
+    handleSwitches?: boolean;
+    sizes?: Map<number, { width: number; height: number }>;
+  } = {},
+): Promise<VideoSession> {
+  const mock = await MockRustDeskServer.start({ sendVideoFrame: false, ...mockOptions });
+  let connection: RelayConnection | undefined;
+  let flow: LoginFlow | undefined;
+  let pipeline: VideoPipeline | undefined;
+  let reader: Promise<void> | undefined;
+  try {
+    const conn = await connectRelay(connectionOptions(mock));
+    connection = conn;
+    flow = new LoginFlow(conn, {
+      peerId: mock.peerId,
+      password: mock.password,
+      loginTimeoutMs: 2000,
+    });
+    const peerInfo = await flow.start();
+    await waitFor(() => mock.loggedIn);
+
+    const stats = { decoded: [] as number[], rebuilds: 0 };
+    const sizes = options.sizes ?? DEFAULT_VIDEO_SIZES;
+    pipeline = new VideoPipeline({
+      decoder: {
+        decode: async (data): Promise<Vp9Frame> => {
+          const id = data[0] ?? -1;
+          stats.decoded.push(id);
+          const size = sizes.get(id) ?? { width: 1920, height: 1080 };
+          return {
+            width: size.width,
+            height: size.height,
+            format: { displayWidth: size.width, displayHeight: size.height },
+          };
+        },
+        recycle: () => {},
+        rebuild: async () => {
+          stats.rebuilds += 1;
+        },
+      },
+      channel: conn,
+      sink: { draw: () => {} },
+      initialDisplay: peerInfo.currentDisplay,
+    });
+    const active = pipeline;
+    reader = (async () => {
+      for (;;) {
+        const msg = await conn.nextMessage(5000);
+        if (msg.video_frame) active.push(msg.video_frame);
+        else if (options.handleSwitches && msg.misc?.switch_display) {
+          active.handleSwitchDisplay(msg.misc.switch_display);
+        }
+      }
+    })().catch(() => undefined);
+
+    return {
+      mock,
+      connection: conn,
+      pipeline: active,
+      peerInfo,
+      stats,
+      close: async () => {
+        await active.dispose();
+        flow?.dispose();
+        conn.close();
+        await reader;
+        await mock.close();
+      },
+    };
+  } catch (error) {
+    await pipeline?.dispose();
+    flow?.dispose();
+    connection?.close();
+    await reader;
+    await mock.close();
+    throw error;
+  }
 }
 
 describe('mock hbbs/hbbr/peer integration', () => {
@@ -156,6 +254,7 @@ describe('mock hbbs/hbbr/peer integration', () => {
             return { width: 1, height: 1 };
           },
           recycle: () => {},
+          rebuild: async () => {},
         },
         channel: conn,
         sink: { draw: () => {} },
@@ -187,6 +286,69 @@ describe('mock hbbs/hbbr/peer integration', () => {
       connection?.close();
       await reader;
       await mock.close();
+    }
+  });
+
+  it('switches displays over the relay and recovers on the new display', async () => {
+    const displays: message.DisplayInfo[] = [
+      { x: 0, y: 0, width: 1920, height: 1080, name: 'DP-1', online: true },
+      { x: 1920, y: 0, width: 1280, height: 720, name: 'HDMI-1', online: true },
+    ];
+    const session = await startVideoSession(
+      { displays, currentDisplay: 0 },
+      { handleSwitches: true },
+    );
+    const { mock, pipeline, stats } = session;
+    try {
+      expect(session.peerInfo.displays).toHaveLength(2);
+      expect(session.peerInfo.currentDisplay).toBe(0);
+
+      mock.sendVideo([{ key: true, data: [1] }], { display: 0 });
+      await waitFor(() => stats.decoded.length === 1 && mock.videoAcks === 1);
+
+      pipeline.switchDisplay(1);
+      expect(pipeline.currentDisplay).toBe(1);
+      await waitFor(() => mock.switchDisplayRequests.length === 1);
+      expect(mock.switchDisplayRequests[0]?.display).toBe(1);
+
+      // A frame for another display is acked but never decoded.
+      mock.sendVideo([{ key: true, data: [9] }], { display: 2 });
+      await waitFor(() => mock.videoAcks === 2);
+      expect(stats.decoded).toEqual([1]);
+      await waitFor(() => stats.rebuilds === 1 && mock.refreshRequests >= 1);
+
+      mock.sendSwitchDisplay({ display: 1, width: 1280, height: 720 });
+      mock.sendVideo([{ key: true, data: [2] }], { display: 1 });
+      await waitFor(() => stats.decoded.length === 2 && mock.videoAcks === 3);
+      await pipeline.idle();
+      expect(stats.decoded).toEqual([1, 2]);
+      expect(pipeline.currentDisplay).toBe(1);
+      expect(pipeline.awaitingKeyframe).toBe(false);
+      expect(stats.rebuilds).toBe(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('rebuilds after a resolution change over the relay', async () => {
+    const session = await startVideoSession({});
+    const { mock, pipeline, stats } = session;
+    try {
+      mock.sendVideo([{ key: true, data: [1] }]);
+      await waitFor(() => stats.decoded.length === 1 && mock.videoAcks === 1);
+
+      mock.sendVideo([{ key: true, data: [2] }]);
+      await waitFor(() => stats.decoded.length === 2);
+      await waitFor(() => stats.rebuilds === 1 && mock.refreshRequests >= 1);
+      expect(pipeline.awaitingKeyframe).toBe(true);
+
+      mock.sendVideo([{ key: true, data: [2] }]);
+      await waitFor(() => stats.decoded.length === 3 && mock.videoAcks === 3);
+      await pipeline.idle();
+      expect(pipeline.awaitingKeyframe).toBe(false);
+      expect(stats.rebuilds).toBe(1);
+    } finally {
+      await session.close();
     }
   });
 

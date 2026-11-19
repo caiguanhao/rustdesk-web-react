@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import * as message from '../src/protocol/message';
 import type { DeepPartial } from '../src/protocol/message';
 import {
@@ -7,7 +7,7 @@ import {
   type VideoDecoder,
   type VideoSink,
 } from '../src/media/video-pipeline';
-import type { Vp9Frame } from '../src/media/vp9-decoder';
+import type { FrameSize, Vp9Frame } from '../src/media/vp9-decoder';
 import { RustDeskError } from '../src/session/errors';
 
 interface FrameSpec {
@@ -15,9 +15,9 @@ interface FrameSpec {
   id?: number;
 }
 
-function batch(specs: FrameSpec[]): message.VideoFrame {
+function batch(specs: FrameSpec[], display = 0): message.VideoFrame {
   return message.VideoFrame.fromPartial({
-    display: 0,
+    display,
     timestamp: 1,
     vp9s: message.VP9s.fromPartial({
       frames: specs.map((spec, index) =>
@@ -34,8 +34,11 @@ function batch(specs: FrameSpec[]): message.VideoFrame {
 class TestDecoder implements VideoDecoder {
   readonly decodedData: number[] = [];
   readonly recycled: Vp9Frame[] = [];
+  size: FrameSize = { width: 1, height: 1 };
   delayMs = 0;
   failNext = false;
+  rebuilds = 0;
+  rebuildError: Error | undefined;
 
   async decode(data: Uint8Array): Promise<Vp9Frame | null> {
     if (this.delayMs > 0) {
@@ -46,11 +49,23 @@ class TestDecoder implements VideoDecoder {
       return null;
     }
     this.decodedData.push(data[0] ?? -1);
-    return { width: 1, height: 1 };
+    return {
+      width: this.size.width,
+      height: this.size.height,
+      format: {
+        displayWidth: this.size.width,
+        displayHeight: this.size.height,
+      },
+    };
   }
 
   recycle(frame: Vp9Frame): void {
     this.recycled.push(frame);
+  }
+
+  async rebuild(): Promise<void> {
+    this.rebuilds += 1;
+    if (this.rebuildError) throw this.rebuildError;
   }
 }
 
@@ -176,6 +191,23 @@ describe('VideoPipeline', () => {
     expect(pipeline.awaitingKeyframe).toBe(true);
   });
 
+  it('does not decode or draw frames while the page is hidden', async () => {
+    const decoder = new TestDecoder();
+    const sink = fakeSink();
+    const pipeline = new VideoPipeline({ decoder, channel: fakeChannel(), sink });
+
+    pipeline.handleVisibilityChange(false);
+    pipeline.push(batch([{ key: true, id: 1 }]));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([]);
+    expect(sink.drawn).toHaveLength(0);
+
+    pipeline.handleVisibilityChange(true);
+    pipeline.push(batch([{ key: true, id: 2 }]));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([2]);
+  });
+
   it('reports non-VP9 frames, acks them and does not request a refresh', () => {
     const decoder = new TestDecoder();
     const channel = fakeChannel();
@@ -278,5 +310,143 @@ describe('VideoPipeline', () => {
     pipeline.push(batch([{ key: true }]));
     await pipeline.idle();
     expect(decoder.recycled).toHaveLength(1);
+  });
+
+  it('accepts only the initial display (legacy display 0 also allowed)', async () => {
+    const decoder = new TestDecoder();
+    const pipeline = new VideoPipeline({
+      decoder,
+      channel: fakeChannel(),
+      sink: fakeSink(),
+      initialDisplay: 1,
+    });
+
+    pipeline.push(batch([{ key: true, id: 1 }], 2));
+    expect(decoder.decodedData).toEqual([]);
+    pipeline.push(batch([{ key: true, id: 2 }], 0));
+    pipeline.push(batch([{ key: true, id: 3 }], 1));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([2, 3]);
+  });
+
+  it('switches display, drops stale frames, rebuilds and refreshes', async () => {
+    const decoder = new TestDecoder();
+    const channel = fakeChannel();
+    const pipeline = new VideoPipeline({ decoder, channel, sink: fakeSink() });
+    pipeline.push(batch([{ key: true, id: 1 }]));
+    await pipeline.idle();
+
+    pipeline.switchDisplay(1);
+    expect(pipeline.currentDisplay).toBe(1);
+    expect(pipeline.awaitingKeyframe).toBe(true);
+    expect(channel.sent).toContainEqual({
+      misc: { switch_display: { display: 1 } },
+    });
+
+    // Frames from another display are acked but dropped while suspended.
+    pipeline.push(batch([{ key: true, id: 8 }], 2));
+    await vi.waitFor(() => {
+      expect(decoder.rebuilds).toBe(1);
+      expect(countMisc(channel.sent, 'refresh_video')).toBe(1);
+    });
+    expect(decoder.decodedData).toEqual([1]);
+    expect(countMisc(channel.sent, 'video_received')).toBe(2);
+
+    // After the reset, deltas are still gated until a keyframe arrives.
+    pipeline.push(batch([{ key: false, id: 2 }], 1));
+    pipeline.push(batch([{ key: true, id: 3 }], 1));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([1, 3]);
+    expect(pipeline.awaitingKeyframe).toBe(false);
+    expect(decoder.recycled).toHaveLength(2);
+  });
+
+  it('does not draw a frame that was decoding when the display switched', async () => {
+    const decoder = new TestDecoder();
+    decoder.delayMs = 5;
+    const sink = fakeSink();
+    const pipeline = new VideoPipeline({ decoder, channel: fakeChannel(), sink });
+
+    pipeline.push(batch([{ key: true, id: 1 }]));
+    pipeline.switchDisplay(1);
+    await vi.waitFor(() => {
+      expect(decoder.rebuilds).toBe(1);
+      expect(decoder.recycled).toHaveLength(1);
+    });
+
+    expect(sink.drawn).toHaveLength(0);
+  });
+
+  it('rebuilds after a decoded resolution change and recovers', async () => {
+    const decoder = new TestDecoder();
+    const channel = fakeChannel();
+    const sink = fakeSink();
+    const pipeline = new VideoPipeline({ decoder, channel, sink });
+    pipeline.push(batch([{ key: true, id: 1 }]));
+    await pipeline.idle();
+    expect(sink.drawn).toHaveLength(1);
+
+    decoder.size = { width: 2, height: 2 };
+    pipeline.push(batch([{ key: true, id: 2 }]));
+    await pipeline.idle();
+    await vi.waitFor(() => {
+      expect(decoder.rebuilds).toBe(1);
+      expect(countMisc(channel.sent, 'refresh_video')).toBe(1);
+    });
+    expect(pipeline.awaitingKeyframe).toBe(true);
+
+    pipeline.push(batch([{ key: true, id: 3 }]));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([1, 2, 3]);
+    expect(sink.drawn).toHaveLength(3);
+    expect(decoder.rebuilds).toBe(1);
+  });
+
+  it('handles inbound display switches', async () => {
+    const decoder = new TestDecoder();
+    const channel = fakeChannel();
+    const pipeline = new VideoPipeline({ decoder, channel, sink: fakeSink() });
+    pipeline.push(batch([{ key: true, id: 1 }]));
+    await pipeline.idle();
+
+    pipeline.handleSwitchDisplay(
+      message.SwitchDisplay.fromPartial({ display: 1, width: 4, height: 3 }),
+    );
+    expect(pipeline.currentDisplay).toBe(1);
+    await vi.waitFor(() => {
+      expect(decoder.rebuilds).toBe(1);
+      expect(countMisc(channel.sent, 'refresh_video')).toBe(1);
+    });
+
+    // Same display is metadata only; no extra rebuild.
+    pipeline.push(batch([{ key: true, id: 2 }], 1));
+    await pipeline.idle();
+    pipeline.handleSwitchDisplay(
+      message.SwitchDisplay.fromPartial({ display: 1, width: 1, height: 1 }),
+    );
+    expect(decoder.rebuilds).toBe(1);
+  });
+
+  it('reports a rebuild failure but still requests a fresh keyframe', async () => {
+    const decoder = new TestDecoder();
+    decoder.rebuildError = new Error('worker failed');
+    const channel = fakeChannel();
+    const errors: RustDeskError[] = [];
+    const pipeline = new VideoPipeline({
+      decoder,
+      channel,
+      sink: fakeSink(),
+      onError: (error) => errors.push(error),
+    });
+
+    pipeline.switchDisplay(1);
+    await vi.waitFor(() => {
+      expect(errors.map((error) => error.code)).toEqual(['asset-load-failed']);
+      expect(countMisc(channel.sent, 'refresh_video')).toBe(1);
+    });
+
+    pipeline.push(batch([{ key: true, id: 2 }], 1));
+    await pipeline.idle();
+    expect(decoder.decodedData).toEqual([2]);
   });
 });

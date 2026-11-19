@@ -23,7 +23,7 @@ import type { RelayConnection } from './connection.js';
 import { challengeResponse } from '../crypto/password.js';
 import { RustDeskError } from '../session/errors.js';
 import type { ImageQuality } from '../session/options.js';
-import type { PeerInfo } from '../session/peer-info.js';
+import { clampDisplayIndex, type PeerInfo } from '../session/peer-info.js';
 import type { RustDeskStatusEvent } from '../session/state.js';
 
 export const DEFAULT_LOGIN_TIMEOUT_MS = 60_000;
@@ -103,7 +103,7 @@ export function mapPeerInfo(info: message.PeerInfo): PeerInfo {
     platform: info.platform,
     // Wire and public DisplayInfo shapes are identical.
     displays: info.displays,
-    currentDisplay: info.current_display,
+    currentDisplay: clampDisplayIndex(info.current_display, info.displays),
     sasEnabled: info.sas_enabled,
     version: info.version,
     connectionId: info.conn_id,

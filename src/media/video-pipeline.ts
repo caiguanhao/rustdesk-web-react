@@ -12,17 +12,30 @@
  * encoded-frame queue, drops stale deltas, and hands decoded frames to a
  * synchronous sink. The sink must draw immediately; the pipeline recycles the
  * YUV frame right after `draw` returns.
+ *
+ * P2-4 adds display targeting: nonzero frames for a different display are
+ * dropped, a switch clears the queue and rebuilds the decoder in the
+ * background, and a decoded-size change triggers the same reset so ogv never
+ * reuses buffers across resolutions. Every reset ends with a forced
+ * `refresh_video`; frames arriving meanwhile are still acked.
  */
 import * as message from '../protocol/message.js';
 import type { DeepPartial } from '../protocol/message.js';
 import type { RelayConnection } from '../protocol/connection.js';
 import { RustDeskError } from '../session/errors.js';
-import type { Vp9Decoder, Vp9Frame } from './vp9-decoder.js';
+import { isDisplayIndex } from '../session/peer-info.js';
+import {
+  frameSize,
+  sameSize,
+  type FrameSize,
+  type Vp9Decoder,
+  type Vp9Frame,
+} from './vp9-decoder.js';
 
 export const DEFAULT_MAX_QUEUED_FRAMES = 8;
 export const DEFAULT_REFRESH_INTERVAL_MS = 1_000;
 
-export type VideoDecoder = Pick<Vp9Decoder, 'decode' | 'recycle'>;
+export type VideoDecoder = Pick<Vp9Decoder, 'decode' | 'recycle' | 'rebuild'>;
 
 export type VideoChannel = Pick<RelayConnection, 'sendMessage'>;
 
@@ -35,6 +48,8 @@ export interface VideoPipelineOptions {
   decoder: VideoDecoder;
   channel: VideoChannel;
   sink: VideoSink;
+  /** Display index to accept initially (from `PeerInfo.currentDisplay`). */
+  initialDisplay?: number;
   /** Pending encoded-frame cap, default 8. */
   maxQueuedFrames?: number;
   /** Minimum gap between refresh_video requests, default 1 s. */
@@ -59,10 +74,13 @@ export class VideoPipeline {
   private awaiting = true;
   private running = false;
   private disposed = false;
+  private suspended = false;
+  private resetPromise: Promise<void> | undefined;
   private drainPromise: Promise<void> | undefined;
   private lastRefreshAt = Number.NEGATIVE_INFINITY;
   private lastVisible = true;
-  private display = 0;
+  private display: number;
+  private lastFrameSize: FrameSize | null = null;
 
   constructor(options: VideoPipelineOptions) {
     this.decoder = options.decoder;
@@ -72,6 +90,8 @@ export class VideoPipeline {
     this.refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
     this.now = options.now ?? Date.now;
     this.onError = options.onError;
+    const initial = options.initialDisplay;
+    this.display = initial !== undefined && isDisplayIndex(initial) ? initial : 0;
   }
 
   get awaitingKeyframe(): boolean {
@@ -82,7 +102,7 @@ export class VideoPipeline {
     return this.queue.length;
   }
 
-  /** Display index of the most recent VideoFrame message. */
+  /** Display the pipeline is targeting (initial PeerInfo display or a switch). */
   get currentDisplay(): number {
     return this.display;
   }
@@ -106,8 +126,18 @@ export class VideoPipeline {
       return;
     }
 
-    this.display = video.display;
-    this.accept(video.vp9s.frames);
+    const frames = video.vp9s.frames;
+    if (this.suspended || !this.lastVisible) {
+      this.stats.dropped += frames.length;
+      return;
+    }
+    // display=0 is the protobuf default and also what older peers send for the
+    // selected display; only reject an explicitly different nonzero display.
+    if (video.display !== 0 && video.display !== this.display) {
+      this.stats.dropped += frames.length;
+      return;
+    }
+    this.accept(frames);
     this.kick();
   }
 
@@ -129,7 +159,38 @@ export class VideoPipeline {
     if (!resumed) return;
     this.queue.length = 0;
     this.awaiting = true;
-    this.requestKeyframe(true);
+    // A reset in progress sends its own refresh once the rebuilt decoder is ready.
+    if (!this.suspended) this.requestKeyframe(true);
+  }
+
+  /**
+   * Ask the peer to capture another display, then clear queued frames, rebuild
+   * the decoder in the background and request a keyframe. Returns immediately
+   * so callers on the message loop never block on the worker rebuild; the
+   * picture recovers on the next keyframe. Display bounds belong to the
+   * session (`PeerInfo.displays`).
+   */
+  switchDisplay(display: number): void {
+    if (!isDisplayIndex(display)) {
+      throw new RustDeskError('protocol-error', `Invalid display index: ${display}`);
+    }
+    if (this.disposed || display === this.display) return;
+    if (!this.sendMisc({ switch_display: { display } }, 'Failed to switch display')) {
+      return;
+    }
+    this.beginReset(display);
+  }
+
+  /**
+   * Handle the peer's `Misc.switch_display`. A different index is treated as a
+   * switch; resolution changes are detected from decoded frame sizes, which
+   * are authoritative for ogv.
+   */
+  handleSwitchDisplay(sw: message.SwitchDisplay): void {
+    if (this.disposed || !isDisplayIndex(sw.display) || sw.display === this.display) {
+      return;
+    }
+    this.beginReset(sw.display);
   }
 
   /** Resolves when the queue is empty and no decode is in flight. */
@@ -141,8 +202,9 @@ export class VideoPipeline {
   }
 
   /**
-   * Stop admitting frames and wait for any in-flight decode. Dispose the
-   * decoder only after this resolves (P4-1 owns the decoder).
+   * Stop admitting frames and wait for the in-flight decode and any pending
+   * decoder rebuild. Dispose the decoder only after this resolves (P4-1 owns
+   * the decoder).
    */
   async dispose(): Promise<void> {
     if (!this.disposed) {
@@ -151,6 +213,8 @@ export class VideoPipeline {
       this.resolveIdle();
     }
     await this.drainPromise;
+    // P4-1 disposes the decoder only after this resolves.
+    await this.resetPromise;
   }
 
   private accept(frames: message.VP9[]): void {
@@ -233,10 +297,20 @@ export class VideoPipeline {
           if (frame) this.decoder.recycle(frame);
           break;
         }
+        if (this.suspended || !this.lastVisible) {
+          // A switch/reset began or the page was hidden while this frame decoded.
+          if (frame) this.decoder.recycle(frame);
+          continue;
+        }
         if (!frame) {
           this.markAwaitingKeyframe();
           continue;
         }
+
+        const size = frameSize(frame);
+        const resized =
+          size !== null && this.lastFrameSize !== null && !sameSize(this.lastFrameSize, size);
+        if (size) this.lastFrameSize = size;
 
         this.stats.decoded += 1;
         let released = false;
@@ -257,6 +331,13 @@ export class VideoPipeline {
           // Release even if the sink forgot or threw; recycling is idempotent.
           release();
         }
+
+        if (resized) {
+          // The decoder handled this frame, but ogv buffers cannot be reused
+          // across resolutions; rebuild before accepting the next keyframe.
+          this.beginReset(this.display);
+          break;
+        }
       }
     } finally {
       this.running = false;
@@ -265,6 +346,44 @@ export class VideoPipeline {
       } else if (this.queue.length === 0) {
         this.resolveIdle();
       }
+    }
+  }
+
+  /** Invalidate the current stream, rebuild the decoder, then request a keyframe. */
+  private beginReset(display: number): void {
+    if (this.disposed) return;
+    this.display = display;
+    this.queue.length = 0;
+    this.awaiting = true;
+    this.lastFrameSize = null;
+    if (!this.suspended) {
+      this.suspended = true;
+      this.resetPromise = this.runResets();
+    }
+  }
+
+  private async runResets(): Promise<void> {
+    try {
+      // Wait for the in-flight decode; suspended blocks new frames. Switches
+      // requested during the wait/rebuild share this one fresh worker.
+      await this.idle();
+      if (this.disposed) return;
+      try {
+        await this.decoder.rebuild();
+      } catch (error) {
+        if (this.disposed) return;
+        this.report(
+          error instanceof RustDeskError
+            ? error
+            : new RustDeskError('asset-load-failed', 'Failed to rebuild the VP9 decoder', {
+                cause: error,
+              }),
+        );
+      }
+    } finally {
+      this.suspended = false;
+      // Hiding the tab will force a refresh on resume instead.
+      if (!this.disposed && this.lastVisible) this.requestKeyframe(true);
     }
   }
 
@@ -280,17 +399,24 @@ export class VideoPipeline {
 
   private requestKeyframe(force: boolean): void {
     const now = this.now();
-    if (!force && now - this.lastRefreshAt < this.refreshIntervalMs) return;
+    if (
+      !force &&
+      (this.suspended || !this.lastVisible || now - this.lastRefreshAt < this.refreshIntervalMs)
+    ) {
+      return;
+    }
     this.lastRefreshAt = now;
     this.stats.refreshes += 1;
     this.sendMisc({ refresh_video: true }, 'Failed to request a keyframe');
   }
 
-  private sendMisc(misc: DeepPartial<message.Misc>, failure: string): void {
+  private sendMisc(misc: DeepPartial<message.Misc>, failure: string): boolean {
     try {
       this.channel.sendMessage({ misc });
+      return true;
     } catch (cause) {
       this.report(new RustDeskError('connection-lost', failure, { cause }));
+      return false;
     }
   }
 

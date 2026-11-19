@@ -65,6 +65,11 @@ export function frameSize(frame: Vp9Frame): FrameSize | null {
   return width && height ? { width, height } : null;
 }
 
+export function sameSize(a: FrameSize | null, b: FrameSize | null): boolean {
+  if (!a || !b) return a === b;
+  return a.width === b.width && a.height === b.height;
+}
+
 interface OgvDecoder {
   frameBuffer: Vp9Frame | null;
   init(callback: () => void): void;

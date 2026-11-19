@@ -283,6 +283,24 @@ describe('MVP field additions', () => {
     expect(message.PublicKey.decode(v1).kx_version).toBe(0);
   });
 
+  it('round-trips Message.peer_info field 25 (display-list sync)', () => {
+    const bytes = message.Message.encode(
+      message.Message.fromPartial({
+        peer_info: message.PeerInfo.fromPartial({
+          displays: [
+            { x: 0, y: 0, width: 800, height: 600, name: 'HDMI-1', online: true },
+          ],
+          // The peer sends 0 in mid-session syncs; the client keeps its own selection.
+          current_display: 0,
+        }),
+      }),
+    ).finish();
+    expect(Array.from(bytes.slice(0, 2))).toEqual([0xca, 0x01]);
+    const decoded = message.Message.decode(bytes);
+    expect(decoded.peer_info?.displays[0]?.name).toBe('HDMI-1');
+    expect(decoded.misc).toBeUndefined();
+  });
+
   it('round-trips KeyEvent.mode and VideoFrame.display', () => {
     const key = message.KeyEvent.decode(
       message.KeyEvent.encode(

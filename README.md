@@ -41,7 +41,8 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
 - `src/protocol/message.ts`、`rendezvous.ts`：直接复用 rustdesk-web v1 的
   ts-proto 生成代码（AGPL-3.0-or-later），并补上 MVP 所需的
   `Clipboard.format`、`MultiClipboards`、`KeyEvent.mode`、`VideoFrame.display`、
-  `LoginRequest.version/my_platform`、`PublicKey.kx_version`。
+  `LoginRequest.version/my_platform`、`PublicKey.kx_version`、`Message.peer_info`
+  （field 25，会话中 display 列表同步）。
 - `proto/message.proto`、`proto/rendezvous.proto`：RustDesk 1.5.3
   (`d40e1da71`) 原样副本，仅作字段对照。
 - 新增字段默认值都是 protobuf 零值且编码时省略，因此 v1 消息字节保持不变；
@@ -161,6 +162,37 @@ npm run dev        # demo，http://localhost:5173
   dispose 和全屏（标准/前缀/不支持/拒绝）。`npm run test:decoder` 额外
   用真实 VP9 帧验证 WebGL 像素回读 `(255,0,0,255)` 及两种容器比例下的
   CSS letterbox 几何；真机全屏/旋转列入 P5-1/P5-2。
+
+## 显示切换与分辨率（P2-4）
+
+- `VideoPipelineOptions.initialDisplay` 来自登录 `PeerInfo.currentDisplay`；
+  `currentDisplay` 表示当前目标 display。非零且与目标不同的
+  `VideoFrame.display` 会 ack 后丢弃；`display=0` 兼容旧端（旧版本所有帧都为 0）。
+- `pipeline.switchDisplay(index)` 发送 `Misc.switch_display{display}`
+  （只带 index；MVP 不做自定义分辨率），立即清空队列并进入 suspended，
+  后台等待在途解码、调用 `Vp9Decoder.rebuild()`、解除 suspended 并强制
+  `refresh_video`。方法立即返回，避免阻塞 P4-1 的消息循环；`dispose()` 会
+  等待重建结束。重建期间到达的多次切换合并为一次重建，最终 display 生效。
+- 收到 `Misc.switch_display` 且 index 变化时按同样流程重置；同 index 只作为
+  display 几何元数据忽略。分辨率变化以解码帧的 `frameSize()` 为准：尺寸变化
+  时先绘制该帧（libvpx 已处理带内变化），随后清队列、重建 decoder、请求新
+  keyframe，画面在新 keyframe 到达后恢复。
+- suspended 或页面隐藏时到达的帧仍每批 ack，但不入队、不解码；隐藏期间不
+  发送非强制 refresh，恢复可见时清队列并强制请求 keyframe。重建失败通过
+  `onError` 报告并仍请求 keyframe（旧 worker 可能继续工作）。
+- `Message.peer_info`（field 25）已支持解码；`clampDisplayIndex()` 修正越界
+  `current_display`，`applyDisplayList()` 合并会话中的 display 列表且不覆盖
+  本地选择（服务端同步会把 current_display 置 0）。P4-1 的消息循环应把
+  `msg.peer_info` 交给它，并把 `msg.misc.switch_display` 交给
+  `handleSwitchDisplay()`。
+- 已知边界：MVP 不发送 `CaptureDisplays`/`refresh_video_display`，也不做用户
+  发起的改分辨率；多显示器、版本感知的严格帧过滤与 P4-3 的显示器选择 UI
+  留待后续。P4-1 需按 `PeerInfo.displays` 校验用户输入的下标（服务端对越界
+  switch 静默忽略）。
+- `tests/video-pipeline.test.ts`（17 项）覆盖 initialDisplay、切换消息、旧
+  display 丢帧、在途帧不绘制、分辨率重建、入站 switch、重建失败、隐藏暂停；
+  `tests/mock-server.test.ts` 通过真实 mock hbbs/hbbr/peer 验证切换与分辨率
+  恢复；`tests/peer-info.test.ts` 覆盖下标 clamp 与 display 列表合并。
 
 ## 本机 Docker 真连环境（P1-9）
 

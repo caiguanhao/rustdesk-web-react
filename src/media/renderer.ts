@@ -13,7 +13,7 @@
  */
 import YUVCanvas from 'yuv-canvas';
 import { RustDeskError } from '../session/errors.js';
-import { frameSize, type Vp9Frame } from './vp9-decoder.js';
+import { frameSize, sameSize, type Vp9Frame } from './vp9-decoder.js';
 import type { VideoSink } from './video-pipeline.js';
 
 export interface RendererLayout {
@@ -149,10 +149,7 @@ export class VideoRenderer implements VideoSink {
       if (!size) {
         throw new RustDeskError('protocol-error', 'Decoded VP9 frame has no dimensions');
       }
-      const resized =
-        !this.currentFrame ||
-        this.currentFrame.width !== size.width ||
-        this.currentFrame.height !== size.height;
+      const resized = !sameSize(this.currentFrame, size);
       this.currentFrame = size;
       this.sink.drawFrame(frame);
       // Container changes arrive through ResizeObserver/window/fullscreen;

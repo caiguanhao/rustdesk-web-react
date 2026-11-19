@@ -45,6 +45,10 @@ export interface MockRustDeskOptions {
   maxRelayBytes?: number;
   /** Send one encrypted synthetic VP9 frame after peer_info (default true). */
   sendVideoFrame?: boolean;
+  /** Display list returned in peer_info (default one 1920x1080 display). */
+  displays?: message.DisplayInfo[];
+  /** Initial `peer_info.current_display` (default 0). */
+  currentDisplay?: number;
 }
 
 function rawToBytes(data: RawData): Uint8Array {
@@ -153,6 +157,7 @@ export class MockRustDeskServer {
   readonly punchHoleRequests: rendezvous.PunchHoleRequest[] = [];
   readonly relayRequests: rendezvous.RequestRelay[] = [];
   readonly loginRequests: message.LoginRequest[] = [];
+  readonly switchDisplayRequests: message.SwitchDisplay[] = [];
   readonly inputs: message.Message[] = [];
   readonly rendezvousPaths: string[] = [];
   readonly relayPaths: string[] = [];
@@ -207,8 +212,10 @@ export class MockRustDeskServer {
       username: 'alice',
       hostname: 'mock-desktop',
       platform: 'Linux',
-      displays: [{ x: 0, y: 0, width: 1920, height: 1080, name: 'DP-1', online: true }],
-      current_display: 0,
+      displays: options.displays ?? [
+        { x: 0, y: 0, width: 1920, height: 1080, name: 'DP-1', online: true },
+      ],
+      current_display: options.currentDisplay ?? 0,
       sas_enabled: false,
       version: '1.5.3',
       conn_id: 42,
@@ -231,12 +238,15 @@ export class MockRustDeskServer {
   }
 
   /** Send one VideoFrame batch from the controlled peer (after login). */
-  sendVideo(frames: { key: boolean; data?: number[] }[]): void {
+  sendVideo(
+    frames: { key: boolean; data?: number[] }[],
+    options: { display?: number } = {},
+  ): void {
     if (!this.peerSend) throw new Error('mock peer is not logged in yet');
     this.peerSend({
       video_frame: {
         timestamp: Date.now(),
-        display: 0,
+        display: options.display ?? 0,
         vp9s: {
           frames: frames.map((frame, index) => ({
             data: Uint8Array.from(frame.data ?? [index + 1]),
@@ -244,6 +254,16 @@ export class MockRustDeskServer {
             pts: index,
           })),
         },
+      },
+    });
+  }
+
+  /** Send the server's display-change echo/metadata. */
+  sendSwitchDisplay(sw: DeepPartial<message.SwitchDisplay>): void {
+    if (!this.peerSend) throw new Error('mock peer is not logged in yet');
+    this.peerSend({
+      misc: {
+        switch_display: message.SwitchDisplay.fromPartial(sw),
       },
     });
   }
@@ -531,6 +551,10 @@ export class MockRustDeskServer {
         }
         if (msg.misc?.refresh_video) {
           this.refreshRequests += 1;
+          continue;
+        }
+        if (msg.misc?.switch_display) {
+          this.switchDisplayRequests.push(msg.misc.switch_display);
           continue;
         }
         if (msg.test_delay) continue;

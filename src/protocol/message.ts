@@ -1365,6 +1365,8 @@ export interface Message {
   cliprdr?: Cliprdr | undefined;
   // P1-1 addition: RustDesk 1.5.3 field 28.
   multi_clipboards?: MultiClipboards | undefined;
+  // P2-4 addition: RustDesk 1.5.3 field 25 (mid-session display-list sync).
+  peer_info?: PeerInfo | undefined;
 }
 
 function createBaseVP9(): VP9 {
@@ -6009,6 +6011,7 @@ function createBaseMessage(): Message {
     misc: undefined,
     cliprdr: undefined,
     multi_clipboards: undefined,
+    peer_info: undefined,
   };
 }
 
@@ -6067,6 +6070,9 @@ export const Message = {
     }
     if (message.cliprdr !== undefined) {
       Cliprdr.encode(message.cliprdr, writer.uint32(162).fork()).ldelim();
+    }
+    if (message.peer_info !== undefined) {
+      PeerInfo.encode(message.peer_info, writer.uint32(202).fork()).ldelim();
     }
     if (message.multi_clipboards !== undefined) {
       MultiClipboards.encode(message.multi_clipboards, writer.uint32(226).fork()).ldelim();
@@ -6135,6 +6141,9 @@ export const Message = {
         case 20:
           message.cliprdr = Cliprdr.decode(reader, reader.uint32());
           break;
+        case 25:
+          message.peer_info = PeerInfo.decode(reader, reader.uint32());
+          break;
         case 28:
           message.multi_clipboards = MultiClipboards.decode(reader, reader.uint32());
           break;
@@ -6169,6 +6178,7 @@ export const Message = {
       multi_clipboards: isSet(object.multi_clipboards)
         ? MultiClipboards.fromJSON(object.multi_clipboards)
         : undefined,
+      peer_info: isSet(object.peer_info) ? PeerInfo.fromJSON(object.peer_info) : undefined,
     };
   },
 
@@ -6210,6 +6220,8 @@ export const Message = {
       (obj.multi_clipboards = message.multi_clipboards
         ? MultiClipboards.toJSON(message.multi_clipboards)
         : undefined);
+    message.peer_info !== undefined &&
+      (obj.peer_info = message.peer_info ? PeerInfo.toJSON(message.peer_info) : undefined);
     return obj;
   },
 
@@ -6269,6 +6281,9 @@ export const Message = {
       : undefined;
     message.multi_clipboards = (object.multi_clipboards !== undefined && object.multi_clipboards !== null)
       ? MultiClipboards.fromPartial(object.multi_clipboards)
+      : undefined;
+    message.peer_info = (object.peer_info !== undefined && object.peer_info !== null)
+      ? PeerInfo.fromPartial(object.peer_info)
       : undefined;
     return message;
   },
