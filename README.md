@@ -81,6 +81,11 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   `wrong-password`/`two-factor-required`/`too-many-attempts`/`try-later`/
   `blocked`/`no-permission`/`peer-offline`/`peer-error`。mock peer 测试见
   `tests/login.test.ts`。
+- `tests/mocks/rustdesk-mock.ts`：一套 Node mock 同时扮演 hbbs、hbbr 和受控端
+  （SignedId/PublicKey/Hash/Login、合成 VP9 帧、输入记录），支持 `/ws/id`、
+  `/ws/relay` 路径、uuid 配对转发、30s 配对/空闲超时、64KiB/64MiB 消息上限，
+  以及成功/离线/拒绝/错误密码场景。`tests/mock-server.test.ts` 跑通
+  connect+login+加密输入、路径模式、错误 key、配对/空闲/大小限制等集成用例。
 
 ## 开发
 
