@@ -73,6 +73,14 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   取消；返回对象封装 `sendMessage`/`nextMessage`（后者把
   `Misc.close_reason` 映射为 `peer-closed`）和 `close()`。mock hbbs+hbbr 真实
   配对/转发测试见 `tests/connection.test.ts`。
+- `src/protocol/login.ts`：登录流程——`Hash` → 最小 `LoginRequest`（默认不带
+  `supported_decoding`/version/my_platform/session_id）→ `peer_info`。错误密码
+  沿用同一 Hash 通过 `login()` 重试；`No Password Access` 视为等待远端点接受；
+  60s 登录超时、3s 后 `awaiting-approval`、12s `TestDelay` 心跳与回显、`permission_info`
+  （键盘/剪贴板/音频/文件）、提前视频帧 ack 与暂存。错误字符串映射为
+  `wrong-password`/`two-factor-required`/`too-many-attempts`/`try-later`/
+  `blocked`/`no-permission`/`peer-offline`/`peer-error`。mock peer 测试见
+  `tests/login.test.ts`。
 
 ## 开发
 
