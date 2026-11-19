@@ -95,7 +95,7 @@ npm install
 npm run typecheck  # tsc strict 检查（不产出文件）
 npm run build      # Vite library mode + tsc 类型声明 → dist/
 npm run test         # Vitest
-npm run test:canvas  # Playwright 画布/鼠标测试（需 Chrome 或 npx playwright install chromium）
+npm run test:canvas  # Playwright 画布/鼠标/键盘测试（需 Chrome 或 npx playwright install chromium）
 npm run test:decoder # headless Chrome 解码器/渲染检查（需本机 Chrome）
 npm run dev          # demo，http://localhost:5173
 ```
@@ -199,14 +199,18 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，加载 `demo/canvas-test.html`：解码
-  `test-fixtures/vp9.ts` 的 red/green 64x64 无损 VP9 keyframe，通过
-  `VideoRenderer` 绘制，读回 canvas 像素（红/绿）证明非空，验证 640x360
-  与 360x640 容器下的 letterbox 几何（360x360、偏移 140），并输出 64x64
-  解码+绘制微基准 FPS（非远端视频吞吐）。
-- `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5 页面共用的状态、base64、
-  像素回读、快照与 decoder 工厂；`demo/src/decoder-check.ts` 也使用该模块
-  与共享 fixture。
+  Chromium/Chrome，当前跑 3 个 Playwright 测试：
+  1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
+     无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
+     证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
+     （360x360、偏移 140），并输出 64x64 解码+绘制微基准 FPS；
+  2. `demo/input-test.html` 用真实浏览器鼠标验证 mask/坐标/右键菜单/滚轮/
+     拖拽（P3-1）；
+  3. 同一页面用真实 `page.keyboard` 验证物理键码、修饰键、repeat、平台切换
+     与 CtrlAltDel/LockScreen（P3-2）。
+- `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
+  base64、像素回读、快照、renderer 与 decoder 工厂；
+  `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
 - 浏览器选择：优先使用本机 Google Chrome；可用 `CHROME_BIN` 指定其他路径。
   CI 上没有 Chrome 时先运行 `npx playwright install chromium`；
   `npm run test:canvas` 本身不需要网络。
@@ -247,6 +251,39 @@ npm run dev          # demo，http://localhost:5173
 - ⏳ 真机待验：尚无 P4-1/P4-3 的会话/Viewer 输入接线，也没有获授权的真实
   RustDesk 被控端，因此真实点击/拖动/滚轮方向未验证；已通过 通知并记录
   在 plan。P3-1 暂不勾选。
+
+## 键盘输入（P3-2，⏳ 真机待验）
+
+- `src/input/keymaps.ts` 收录 DOM `KeyboardEvent.code` → 对端平台位置键码：
+  Windows scancode（扩展键 `0xE0xx`）、Linux X11 keycode（evdev+8）、
+  Android keycode、macOS virtual keycode。数据来自 rustdesk-web v2
+  `js/dist/index.js`（AGPL，见 `src/input/NOTICE.md`），支持 macOS ISO
+  Backquote/IntlBackslash 交换与可选 Ctrl/Meta 交换。`KeyA` 在 macOS 是 0
+  （合法值，不能用 falsy 判断）。
+- `src/input/keyboard.ts` 的 `KeyboardInput` 使用 Map 模式：
+  keydown/长按 repeat 都发送 `{chr, mode: Map, down:true, press:false}`，
+  keyup 发送 `down:false`；`press:true` 是 Legacy 单击语义，不用于 Map。
+  Ctrl/Alt/Shift/Meta 作为普通物理键事件发送，不放进 `modifiers`；
+  CapsLock/NumLock 只作为可打印/小键盘键的 LED 同步提示（keyup 使用当前
+  `getModifierState()`，合成释放沿用 keydown 快照）。
+- 忽略 `isComposing`/keyCode 229/`Process`/`Unidentified`，不拦截输入法；
+  启用时 keydown 默认 `preventDefault()`（可配置）。`blur`、`focusout`、
+  `pagehide`、页面隐藏、禁用和卸载都会释放所有已按下的键，避免远端卡键。
+- 特殊动作走 Legacy `KeyEvent`（不是 `Misc`）：Windows 对端发
+  `CtrlAltDel(100)`；其他平台发 `Delete` + `Alt/Ctrl` 且 `press:true`；
+  `LockScreen(101)` 单发。P4-3 需根据 `PeerInfo.sas_enabled` 决定是否显示
+  CtrlAltDel。
+- 边界：Android 表的 Map 模式未真机验证（上游桌面客户端对 Android 对端
+  禁用 Map），P4-1 应按 `PeerInfo.version >= 1.2.0`/平台决定是否启用并保留
+  回退空间；IME/软键盘文本属于 P3-3。`test-fixtures/vp9.ts` 等与键盘无关。
+- 验证：`tests/input-keymaps.test.ts`（17 项表/平台/ISO/swap/lock 测试）、
+  `tests/input-keyboard.test.ts`（15 项 jsdom 事件序列/repeat/组合键/
+  composition/释放/特殊键/错误）、`tests/input-keyboard-integration.test.ts`
+  （Node 假 DOM + 真实 mock hbbs/hbbr/peer 加密链路）；Playwright
+  `tests/e2e/keyboard.spec.ts` 用真实浏览器键盘验证。
+- ⏳ 真机待验：真实桌面快捷键（尤其浏览器/OS 保留键）、IME 与 Android Map
+  仍需真实对端。与 P3-1 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），
+  按规则未重复发通知；P3-2 暂不勾选。
 
 ## 本机 Docker 真连环境（P1-9）
 

@@ -12,6 +12,10 @@ Reused components
   commit 8a9af6ecdd511fa97e89844e27c5d2dae53acd77), part of the RustDesk
   project (https://github.com/rustdesk/rustdesk). AGPL-3.0-or-later; see
   src/protocol/NOTICE.md for provenance and modifications.
+- src/input/keymaps.ts transcribes the keyboard position-keycode tables from
+  the RustDesk web client v2 (rustdesk/rustdesk-web, branch rustdesk-web-v2,
+  commit 10a477b67f7411da21fe88f4809eab7cb81e6102). AGPL-3.0-or-later; see
+  src/input/NOTICE.md for provenance and modifications.
 - assets/ogv/ contains ogv.js 1.8.6 decoder assets. See assets/ogv/COPYING,
   assets/ogv/LICENSE-vpx.txt and assets/ogv/PATENTS-vpx.txt.
 - npm dependencies retain their own licenses; see each package's LICENSE.
