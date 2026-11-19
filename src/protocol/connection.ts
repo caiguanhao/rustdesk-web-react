@@ -51,6 +51,11 @@ export interface RendezvousConnectOptions extends UrlContext {
   securingTimeoutMs?: number;
   /** Cancels the connect attempt and closes any open sockets. */
   signal?: AbortSignal;
+  /**
+   * Called after the rendezvous/relay legs are established and before the
+   * signed-key handshake starts (P4-1 maps this to the `securing` status).
+   */
+  onSecuring?: () => void;
   /** Test/Node injection for both sockets. */
   createSocket?: WebSocketFactory;
 }
@@ -253,6 +258,7 @@ export async function connectRelay(
       },
     });
 
+    options.onSecuring?.();
     const secureResult = await raceAbort(
       secureHandshake(relaySock, {
         peerId: options.peerId,

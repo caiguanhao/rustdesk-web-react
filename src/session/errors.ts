@@ -8,6 +8,8 @@
 export type RustDeskErrorCode =
   /** Missing/invalid config (e.g. no `id`, bad explicit URL). */
   | 'invalid-config'
+  /** The session is not in a state that allows this operation. */
+  | 'invalid-state'
   /** Caller aborted via `AbortSignal` or disposed the session. */
   | 'aborted'
   /** A WebSocket open or next-message wait exceeded its deadline. */

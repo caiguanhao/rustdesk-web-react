@@ -353,6 +353,12 @@ export class ClipboardController {
     return this.writeClipboard(text, true);
   }
 
+  /** Clear dedupe/remote text for a reconnect; gates/local settings stay. */
+  reset(): void {
+    this.lastSynced = undefined;
+    this.remoteText = undefined;
+  }
+
   dispose(): void {
     this.disposed = true;
     this.enabledValue = false;

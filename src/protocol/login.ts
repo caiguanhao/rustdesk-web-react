@@ -47,6 +47,11 @@ export interface LoginFlowOptions {
   imageQuality?: ImageQuality;
   /** Send the official 1.3.7 version/my_platform fields (default false). */
   advertiseWebClientVersion?: boolean;
+  /**
+   * Ask the host to disable clipboard sync for this connection
+   * (`OptionMessage.disable_clipboard = Yes`). View-only also sets this.
+   */
+  disableClipboard?: boolean;
   /** Total login budget, default 60 s. */
   loginTimeoutMs?: number;
   /** Emit `awaiting-approval` after this long, default 3 s. */
@@ -278,6 +283,9 @@ export class LoginFlow {
       image_quality: IMAGE_QUALITY[this.options.imageQuality ?? 'balanced'],
       disable_audio: message.OptionMessage_BoolOption.Yes,
       show_remote_cursor: message.OptionMessage_BoolOption.No,
+      disable_clipboard: this.options.disableClipboard
+        ? message.OptionMessage_BoolOption.Yes
+        : message.OptionMessage_BoolOption.NotSet,
     });
     this.channel.sendMessage({
       login_request: {

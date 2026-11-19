@@ -269,6 +269,21 @@ describe('SessionPermissions', () => {
     });
   });
 
+  it('resets peer permissions without touching local flags', () => {
+    const { permissions } = setup({
+      readOnly: true,
+      permissions: { keyboard: false, clipboard: false },
+    });
+
+    permissions.resetPeerPermissions();
+
+    expect(permissions.permissions.keyboard).toBe(true);
+    expect(permissions.permissions.clipboard).toBe(true);
+    expect(permissions.readOnly).toBe(true);
+    expect(permissions.policy.mouse).toBe(false);
+    expect(permissions.policy.clipboardReceive).toBe(false);
+  });
+
   it('binds controllers immediately and on every change', () => {
     const { permissions } = setup();
     const targets = fakeTargets();

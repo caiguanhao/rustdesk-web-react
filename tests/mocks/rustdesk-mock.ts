@@ -283,6 +283,12 @@ export class MockRustDeskServer {
     this.peerSend({ misc: { permission_info: { permission, enabled } } });
   }
 
+  /** End the session from the controlled peer with `Misc.close_reason`. */
+  sendCloseReason(reason: string): void {
+    if (!this.peerSend) throw new Error('mock peer is not logged in yet');
+    this.peerSend({ misc: { close_reason: reason } });
+  }
+
   async close(): Promise<void> {
     for (const timer of this.pairingTimers.values()) clearTimeout(timer);
     for (const timer of this.idleTimers) clearTimeout(timer);

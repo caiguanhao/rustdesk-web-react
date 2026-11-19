@@ -25,12 +25,16 @@ import type {
   PeerInfo,
   RustDeskStatusEvent,
 } from 'rustdesk-web-react';
-import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
+import {
+  RustDeskError,
+  RustDeskSession,
+  DEFAULT_ASSET_BASE_URL,
+} from 'rustdesk-web-react/core';
 ```
 
 - `rustdesk-web-react`：React 组件与 hook（后续任务），React 仅为 peerDependency。
 - `rustdesk-web-react/core`：不依赖 React 的会话/协议类型与错误类，可用于
-  Node/Worker 测试。
+  Node/Worker 测试；`RustDeskSession` 是无 UI 的会话入口（见下文 P4-1）。
 - 配置字段见 `src/session/options.ts`；状态机取值见 `src/session/state.ts`；
   错误码见 `src/session/errors.ts`。
 - `npm run build` 后 `dist/` 同时包含 ESM（`index.js`、`core.js`）和对应的
@@ -443,7 +447,7 @@ npm run dev          # demo，http://localhost:5173
   让 host 侧同步门控；当前只做本地门控，`disable_clipboard` 可在 P4-1 补上，
   `disable_keyboard` 字段未在 vendored codec 中生成。本地门控已保证“不发送”，
   所以不影响本任务验收。
-- 验证：`tests/permissions.test.ts`（16 项：默认/登录时 keyboard、clipboard
+- 验证：`tests/permissions.test.ts`（17 项：默认/登录时 keyboard、clipboard
   快照不报错/audio、file/去重与恢复/readOnly/disableClipboard/登录后撤销
   报错一次/本地禁用时抑制通知/未知消息/初始状态/`bind`/dispose/回调异常/
   `applyInputPolicy` 全目标）、`tests/permissions-integration.test.ts`（真实
@@ -452,6 +456,61 @@ npm run dev          # demo，http://localhost:5173
   输入并阻止键盘/鼠标/剪贴板，恢复后重新发送）。
 - 无需真机：permission_info 是协议消息，mock 黑盒已覆盖；真实对端撤销留待
   P5-5 最终验收。
+
+## 会话层（P4-1，已完成）
+
+- `src/session/RustDeskSession.ts`：框架无关的 `RustDeskSession`，从
+  `rustdesk-web-react/core` 导出。`new RustDeskSession(config, deps?)`（deps
+  仅用于测试/Node 注入）；`connect(signal?)` 完成 rendezvous/relay/签名/登录并
+  在 `peer_info` 时解析 `PeerInfo`。无密码时 Promise 保持 pending 并发出
+  `password-required`；`login(password)` 复用同一 Hash 重试并返回同一个
+  `connect` Promise。`disconnect()` 干净结束（可再次 `connect`）；`dispose()`
+  关闭 socket/worker/定时器/监听并回到 `idle`。
+- 状态：`connecting`（session）→ `securing`（`connectRelay` 新增的
+  `onSecuring` hook）→ `authenticating`/`password-required`/
+  `awaiting-approval`/`connected`（LoginFlow）→ `disconnected`（本地或对端
+  关闭）或 `error`（类型化错误）；`dispose()` → `idle`。错误/已连接状态下
+  `connect`/`login` 以 `invalid-state` 拒绝。
+- 登录后循环：先处理 `takePendingMessages()`（登录期的视频已由 LoginFlow
+  ack，重放用 `acked:true`），再持续 `nextMessage(30s)`；逐字回显
+  `TestDelay{from_client:false}`，每 12s 发送 `TestDelay{from_client:true}` 测
+  RTT；30s 无消息按上游语义报 `timeout`；`Misc.close_reason` 映射为
+  `disconnected`（detail 为原因）。
+- 消息路由：视频 → `VideoPipeline`（无 sink 时 ack 后丢弃；设置 sink 后懒加载
+  `Vp9Decoder`、请求 keyframe；`setVideoSink(null)` 停止解码）；权限 →
+  `SessionPermissions`；剪贴板 → `ClipboardController`（重连时清空去重/远端文本
+  状态）；`Misc.switch_display`
+  与 `Message.peer_info` → 更新 `PeerInfo`/当前显示并同步 input origin/
+  platform；光标/音频/聊天等非 MVP 消息忽略。
+- 事件（`on` 返回 unsubscribe）：`status`、`error`、`clipboard`、
+  `permission`、`peerInfo`、`securityDowngraded`。方法：`sendMouse`/
+  `sendKey`（按权限门控）、`sendText`（Clipboard 优先，seq 降级）、
+  `sendLocalClipboard`/`copyRemoteText`、`switchDisplay`、`setReadOnly`/
+  `setDisableClipboard`、`bindInputs({mouse,keyboard,touch,ime})`、
+  `setVideoSink`。`sendMessage` 是供 DOM 编码器使用的低层 channel。
+- 输入接线：DOM 控制器需要 P4-3 的 canvas/renderer，因此由 P4-3 构造并
+  attach，再传给 `session.bindInputs`；它会应用权限策略，并在登录/显示切换时
+  设置 Mouse/Touch `setOrigin` 与 Keyboard `setPlatform`。P4-3 必须调用它，
+  否则控制器走低层 channel，不会被 readOnly/权限门控；P4-3 的焦点门控也必须
+  与 policy 取交集，不能用 `setEnabled(true)` 覆盖权限门控。
+- 安全：`secure=false` 时发 `securityDowngraded`；`readOnly`/
+  `disableClipboard` 会让 LoginRequest 带 `disable_clipboard=Yes`
+  （`disable_keyboard` 不在 vendored codec 中，本地门控是权威）。
+- 验证：`tests/session.test.ts`（20 项：状态顺序/awaiting-approval/
+  password-required 与错误密码重试/invalid-state/abort/error/disconnect+
+  dispose/reconnect/pending 重放/权限/视频 ack/TestDelay+心跳/peer close/
+  非 VP9/display 校验/securityDowngraded/video sink 与 decoder dispose/
+  sendMouse+sendKey 门控/bindInputs origin+platform/unsubscribe/回调异常/
+  读超时）、`tests/session-integration.test.ts`（真实 mock hbbs/hbbr/peer
+  加密链路：完整连接、视频 ack、权限撤销、双向剪贴板、close_reason；错误密码
+  同连接重试）。`tests/mocks/rustdesk-mock.ts` 新增 `sendCloseReason()`。
+- 延迟项：`SessionStats`/fps 与 `onStats`（P4-3/P5-3；当前只暴露
+  `latencyMs`）；光标形状/位置（`show_remote_cursor` 默认关）；无密码登录不发送
+  空密码 LoginRequest，因此 click-to-accept/`No Password Access` 需要用户输入
+  密码；本端关闭不发 `Misc.close_reason`（v1/v2 web 同，WebSocket 足够）；
+  `disable_keyboard` 协议字段与运行中 `Misc.option` 切换；Android Map 模式/
+  触摸对端策略（P5-2）。
+- P4-1 验收为状态转换与 mock 集成，无需真机；真实 hbbs/client 连接留待 P5-5。
 
 ## 本机 Docker 真连环境（P1-9）
 

@@ -23,3 +23,23 @@ export type {
   RustDeskStatusEvent,
   SessionStats,
 } from './session/state.js';
+
+export { RustDeskSession } from './session/RustDeskSession.js';
+export type {
+  RustDeskSessionDeps,
+  RustDeskSessionEvents,
+  SessionInputTargets,
+  SessionVideoDecoder,
+} from './session/RustDeskSession.js';
+export type { RemoteClipboardEvent } from './input/clipboard.js';
+export type {
+  InputPolicy,
+  InputPolicyTargets,
+  PermissionChange,
+  PermissionEvent,
+  PermissionName,
+  PermissionSnapshot,
+  SessionPermissions,
+} from './session/permissions.js';
+export type { VideoSink } from './media/video-pipeline.js';
+export type { Vp9Frame } from './media/vp9-decoder.js';

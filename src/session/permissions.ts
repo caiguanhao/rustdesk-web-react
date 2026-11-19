@@ -83,6 +83,13 @@ export interface InputPolicyTargets {
   clipboard?: ClipboardTarget;
 }
 
+const PERMISSION_NAMES_LIST = [
+  'keyboard',
+  'clipboard',
+  'audio',
+  'file',
+] as const satisfies readonly PermissionName[];
+
 const PERMISSION_NAMES: Partial<
   Record<PermissionInfo_Permission, PermissionName>
 > = {
@@ -171,6 +178,14 @@ export class SessionPermissions {
     if (this.disposed || enabled === this.disableClipboardValue) return;
     this.disableClipboardValue = enabled;
     this.update();
+  }
+
+  /** Restore peer-granted permissions to enabled; local flags are unchanged. */
+  resetPeerPermissions(): void {
+    if (this.disposed) return;
+    for (const permission of PERMISSION_NAMES_LIST) {
+      this.apply({ permission, enabled: true });
+    }
   }
 
   /**
