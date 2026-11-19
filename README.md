@@ -113,6 +113,33 @@ npm run dev        # demo，http://localhost:5173
 
 部分目录由后续任务（P0/P1）创建。
 
+## 本机 Docker 真连环境（P1-9）
+
+不依赖用户现有服务器/客户端，也不使用用户已安装的 RustDesk 配置：
+
+```bash
+npm run dev:server    # colima + 隔离 hbbs/hbbr（官方 1.1.16 二进制）
+npm run dev:peer      # 隔离被控端，写入 .local/rustdesk-server/peer.json
+npm run dev           # 打开 demo，填写 Server/Server Key/Device ID/Password
+```
+
+- 默认地址：hbbs `127.0.0.1:12116`（WS 12118），hbbr `127.0.0.1:12117`
+  （WS 12119）；`npm run dev:server` 会打印 Server Key。
+- 被控端 ID/密码从 `.local/rustdesk-server/peer.json` 读取（0600、已 gitignore），
+  密码不会打印到终端或写入仓库。
+- 只监听 loopback，容器名固定为 `rdw-hbbs`/`rdw-hbbr`，数据目录
+  `.local/rustdesk-server/data`，与用户 RustDesk 完全隔离。
+- Docker Hub 不可达时改用 GitHub Release 的官方静态二进制，本地 scratch
+  image 不依赖任何 registry；arm64 校验和已固定，其他架构可用
+  `RD_SERVER_AMD64_SHA256` 指定。
+- UDP 注册需要 colima 的 gRPC port forwarder；脚本在 colima 未运行时以
+  `colima start --port-forwarder grpc` 启动，若已在运行会提示手动重启。
+- `npm run test:real` 用真实 hbbs/hbbr 跑完整 connect+login（默认 `npm test`
+  会跳过该用例）。`npm run dev:server status|down|reset|logs` 管理环境。
+- `npm run log-server` + `test-fixtures/remote-input-test.html`：被控端输入
+  日志页（坐标网格/键盘/IME/剪贴板），事件写入
+  `.local/remote-input-events.jsonl`；真实桌面输入验收留给 P5。
+
 ## 相关仓库
 
 - `~/work/source/rustdesk` — 上游 RustDesk（只读）

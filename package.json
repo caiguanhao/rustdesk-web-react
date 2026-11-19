@@ -34,6 +34,10 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:real": "bash scripts/test-real-server.sh",
+    "dev:server": "bash scripts/dev-server.sh",
+    "dev:peer": "tsx scripts/controlled-peer.ts",
+    "log-server": "node scripts/event-log-server.mjs",
     "copy-assets": "node scripts/copy-assets.mjs demo/public",
     "check-size": "node scripts/check-size.mjs"
   },
@@ -61,6 +65,7 @@
     "jsdom": "31.0.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vite": "8.3.8",
     "vitest": "5.1.1",

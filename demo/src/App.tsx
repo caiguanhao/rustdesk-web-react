@@ -2,10 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_ASSET_BASE_URL,
   OGV_RUNTIME_FILES,
+  RustDeskError,
   VERSION,
   assetUrl,
   resolveAssetBaseUrl,
+  type PeerInfo,
 } from 'rustdesk-web-react/core';
+import type { RelayConnection } from '../../src/protocol/connection';
+import type { LoginFlow } from '../../src/protocol/login';
 
 interface ManifestFile {
   name: string;
@@ -38,6 +42,18 @@ type AssetCheckState =
   | { status: 'checking' }
   | { status: 'ok'; result: AssetCheckResult }
   | { status: 'error'; message: string };
+
+interface PasswordPrompt {
+  retry: boolean;
+  detail?: string;
+}
+
+interface ConnectError {
+  code: string;
+  message: string;
+}
+
+const env = import.meta.env;
 
 async function fetchOk(url: string, signal: AbortSignal): Promise<Response> {
   const response = await fetch(url, { cache: 'no-store', signal });
@@ -73,12 +89,6 @@ async function loadOgvLoader(base: string, signal: AbortSignal): Promise<void> {
   window.OGVLoader.base = base;
 }
 
-/**
- * P0-3 acceptance check: fetch the served manifest plus every runtime decoder
- * file from `assetBaseUrl`, compare sizes with the manifest (this catches stale
- * copies and SPA fallbacks that answer 200 with index.html), then load ogv.js
- * and verify `OGVLoader` exists with the right base.
- */
 async function checkAssets(assetBaseUrl: string, signal: AbortSignal): Promise<AssetCheckResult> {
   const base = resolveAssetBaseUrl(assetBaseUrl);
   const manifestResponse = await fetchOk(assetUrl(base, 'manifest.json'), signal);
@@ -88,9 +98,7 @@ async function checkAssets(assetBaseUrl: string, signal: AbortSignal): Promise<A
   const files = await Promise.all(
     OGV_RUNTIME_FILES.map(async (name) => {
       const entry = byName.get(name);
-      if (!entry) {
-        throw new Error(`${name}: missing from manifest.json`);
-      }
+      if (!entry) throw new Error(`${name}: missing from manifest.json`);
       const response = await fetchOk(new URL(name, base).href, signal);
       const bytes = (await response.arrayBuffer()).byteLength;
       if (bytes !== entry.bytes) {
@@ -105,45 +113,282 @@ async function checkAssets(assetBaseUrl: string, signal: AbortSignal): Promise<A
 }
 
 export function App() {
-  const [assetBaseUrl, setAssetBaseUrl] = useState(DEFAULT_ASSET_BASE_URL);
+  const [assetBaseUrl, setAssetBaseUrl] = useState(
+    env.VITE_RD_ASSET_BASE || DEFAULT_ASSET_BASE_URL,
+  );
   const [assetState, setAssetState] = useState<AssetCheckState>({ status: 'checking' });
-  const abortRef = useRef<AbortController | null>(null);
+  const assetAbortRef = useRef<AbortController | null>(null);
 
-  const runCheck = useCallback((base: string) => {
-    abortRef.current?.abort();
+  const [server, setServer] = useState(env.VITE_RD_SERVER ?? '');
+  const [serverKey, setServerKey] = useState(env.VITE_RD_KEY ?? '');
+  const [relayServer, setRelayServer] = useState(env.VITE_RD_RELAY ?? '');
+  const [deviceId, setDeviceId] = useState(env.VITE_RD_ID ?? '');
+  const [password, setPassword] = useState(env.VITE_RD_PASSWORD ?? '');
+  const [status, setStatus] = useState('idle');
+  const [busy, setBusy] = useState(false);
+  const [peerInfo, setPeerInfo] = useState<PeerInfo | null>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<PasswordPrompt | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [error, setError] = useState<ConnectError | null>(null);
+
+  const connectionRef = useRef<RelayConnection | null>(null);
+  const flowRef = useRef<LoginFlow | null>(null);
+  const connectAbortRef = useRef<AbortController | null>(null);
+
+  const cleanupConnection = useCallback(() => {
+    connectAbortRef.current?.abort();
+    connectAbortRef.current = null;
+    flowRef.current?.dispose();
+    flowRef.current = null;
+    connectionRef.current?.close();
+    connectionRef.current = null;
+  }, []);
+
+  useEffect(() => cleanupConnection, [cleanupConnection]);
+
+  const runAssetCheck = useCallback((base: string) => {
+    assetAbortRef.current?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    assetAbortRef.current = controller;
     setAssetState({ status: 'checking' });
     checkAssets(base, controller.signal).then(
       (result) => {
         if (!controller.signal.aborted) setAssetState({ status: 'ok', result });
       },
-      (error: unknown) => {
+      (failure: unknown) => {
         if (controller.signal.aborted) return;
         setAssetState({
           status: 'error',
-          message: error instanceof Error ? error.message : String(error),
+          message: failure instanceof Error ? failure.message : String(failure),
         });
       },
     );
   }, []);
 
   useEffect(() => {
-    runCheck(DEFAULT_ASSET_BASE_URL);
-    return () => abortRef.current?.abort();
-  }, [runCheck]);
+    runAssetCheck(DEFAULT_ASSET_BASE_URL);
+    return () => assetAbortRef.current?.abort();
+  }, [runAssetCheck]);
+
+  const connect = async (): Promise<void> => {
+    cleanupConnection();
+    setError(null);
+    setPeerInfo(null);
+    setPasswordPrompt(null);
+    setPermissions([]);
+    setStatus('connecting');
+    setBusy(true);
+
+    if (!server.trim() || !deviceId.trim()) {
+      setError({ code: 'invalid-config', message: 'Server and Device ID are required.' });
+      setStatus('error');
+      setBusy(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
+    try {
+      // Keep protobuf/libsodium out of the initial demo bundle.
+      const [{ connectRelay }, { LoginFlow }] = await Promise.all([
+        import('../../src/protocol/connection'),
+        import('../../src/protocol/login'),
+      ]);
+      const connection = await connectRelay({
+        server: server.trim(),
+        peerId: deviceId.trim(),
+        serverKey: serverKey.trim() || undefined,
+        relayServer: relayServer.trim() || undefined,
+        secure: window.location.protocol === 'https:',
+        signal: controller.signal,
+        openTimeoutMs: 12_000,
+        responseTimeoutMs: 12_000,
+        securingTimeoutMs: 18_000,
+      });
+      connectionRef.current = connection;
+
+      const flow = new LoginFlow(connection, {
+        peerId: deviceId.trim(),
+        password: password || undefined,
+        loginTimeoutMs: 60_000,
+        onStatus: (event) => {
+          setStatus(event.status);
+          if (event.status === 'password-required') {
+            setPasswordPrompt({ retry: event.retry, detail: event.detail });
+          }
+        },
+        onPermission: (change) => {
+          setPermissions((current) => [
+            ...current,
+            `${change.permission}: ${change.enabled ? 'on' : 'off'}`,
+          ]);
+        },
+      });
+      flowRef.current = flow;
+      const info = await flow.start(undefined, controller.signal);
+      setPeerInfo(info);
+      setPasswordPrompt(null);
+      setStatus('connected');
+    } catch (failure) {
+      if (controller.signal.aborted) return;
+      if (failure instanceof RustDeskError) {
+        setError({ code: failure.code, message: failure.message });
+      } else {
+        setError({
+          code: 'unknown',
+          message: failure instanceof Error ? failure.message : String(failure),
+        });
+      }
+      setStatus('error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retryLogin = (): void => {
+    setPasswordPrompt(null);
+    try {
+      flowRef.current?.login(password);
+    } catch (failure) {
+      setError({
+        code: failure instanceof RustDeskError ? failure.code : 'unknown',
+        message: failure instanceof Error ? failure.message : String(failure),
+      });
+    }
+  };
+
+  const disconnect = (): void => {
+    cleanupConnection();
+    setPeerInfo(null);
+    setPasswordPrompt(null);
+    setPermissions([]);
+    setStatus('idle');
+    setError(null);
+  };
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: '42rem' }}>
+    <main
+      style={{
+        fontFamily: 'system-ui, sans-serif',
+        padding: '2rem',
+        maxWidth: '48rem',
+        margin: '0 auto',
+      }}
+    >
       <h1>rustdesk-web-react</h1>
-      <p>Demo scaffold v{VERSION}. The connection form arrives in P1-9/P4-4.</p>
+      <p>Demo v{VERSION}. Video/input wiring arrives in later tasks.</p>
+
+      <section style={{ marginBottom: '2rem' }}>
+        <h2>Connect</h2>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void connect();
+          }}
+          style={{ display: 'grid', gap: '0.5rem' }}
+        >
+          <label>
+            Server (host:port)
+            <input
+              value={server}
+              onChange={(event) => setServer(event.target.value)}
+              placeholder="127.0.0.1:12116"
+              style={{ width: '100%', fontFamily: 'monospace' }}
+            />
+          </label>
+          <label>
+            Server Key (hbbs public key, base64)
+            <input
+              value={serverKey}
+              onChange={(event) => setServerKey(event.target.value)}
+              style={{ width: '100%', fontFamily: 'monospace' }}
+            />
+          </label>
+          <label>
+            Relay Server (optional)
+            <input
+              value={relayServer}
+              onChange={(event) => setRelayServer(event.target.value)}
+              placeholder="uses RelayResponse / hbbs +3"
+              style={{ width: '100%', fontFamily: 'monospace' }}
+            />
+          </label>
+          <label>
+            Device ID
+            <input
+              value={deviceId}
+              onChange={(event) => setDeviceId(event.target.value)}
+              style={{ width: '100%', fontFamily: 'monospace' }}
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="off"
+              style={{ width: '100%', fontFamily: 'monospace' }}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button type="submit" disabled={busy}>
+              Connect
+            </button>
+            <button type="button" onClick={disconnect}>
+              Disconnect
+            </button>
+            <span>
+              status: <strong>{status}</strong>
+            </span>
+          </div>
+        </form>
+
+        {passwordPrompt && (
+          <div style={{ marginTop: '0.75rem', color: '#8a5a00' }}>
+            Password required{passwordPrompt.retry ? ' (previous password was rejected)' : ''}
+            {passwordPrompt.detail ? `: ${passwordPrompt.detail}` : ''}
+            <div style={{ marginTop: '0.25rem' }}>
+              <button type="button" onClick={retryLogin}>
+                Retry login
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <p style={{ color: '#b00020' }}>
+            {error.code}: {error.message}
+          </p>
+        )}
+
+        {permissions.length > 0 && (
+          <p>permissions: {permissions.join(', ')}</p>
+        )}
+
+        {peerInfo && (
+          <div style={{ marginTop: '0.75rem', color: '#0b7a29' }}>
+            <p>
+              Connected to {peerInfo.username || '(unknown user)'}@{peerInfo.hostname} (
+              {peerInfo.platform}, RustDesk {peerInfo.version})
+            </p>
+            <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
+              {peerInfo.displays.map((display, index) => (
+                <li key={index}>
+                  display {index}: {display.width}×{display.height} {display.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
 
       <section>
         <h2>Decoder assets</h2>
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            runCheck(assetBaseUrl);
+            runAssetCheck(assetBaseUrl);
           }}
           style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
         >
@@ -168,20 +413,9 @@ export function App() {
                 ✓ ogv.js {assetState.result.version}: all {assetState.result.files.length} files
                 served from <code>{assetState.result.base}</code>; loader ready
               </p>
-              <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-                {assetState.result.files.map((file) => (
-                  <li key={file.name}>
-                    <code>{file.name}</code> — {file.bytes.toLocaleString()} bytes
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
         </div>
-        <p style={{ color: '#555', fontSize: '0.875rem' }}>
-          Run <code>npm run copy-assets</code> if the files are missing; <code>npm run dev</code>{' '}
-          copies them automatically.
-        </p>
       </section>
     </main>
   );

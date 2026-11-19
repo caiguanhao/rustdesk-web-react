@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RustDesk remote input test</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body { font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; }
+      h1 { font-size: 1.25rem; margin: 0 0 8px; }
+      .row { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 16px; }
+      @media (max-width: 760px) { .row { grid-template-columns: 1fr; } }
+      .panel { border: 1px solid #8886; border-radius: 8px; padding: 12px; }
+      #grid {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 10;
+        touch-action: none;
+        cursor: crosshair;
+        border: 1px solid #888;
+        background-color: #fff;
+        background-image:
+          linear-gradient(to right, #0001 1px, transparent 1px),
+          linear-gradient(to bottom, #0001 1px, transparent 1px);
+        background-size: 10% 10%;
+        user-select: none;
+      }
+      #grid .axis { position: absolute; color: #555; font: 11px monospace; pointer-events: none; }
+      #grid .dot {
+        position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px;
+        border-radius: 50%; background: #d00; pointer-events: none;
+      }
+      textarea { width: 100%; min-height: 90px; font: inherit; }
+      #log { height: 300px; overflow: auto; font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; }
+      .muted { color: #777; }
+      table { border-collapse: collapse; }
+      td, th { border: 1px solid #8886; padding: 2px 6px; text-align: left; }
+      button { font: inherit; }
+    </style>
+  </head>
+  <body>
+    <h1>RustDesk remote input test</h1>
+    <p class="muted">
+      Open this page on the <strong>controlled</strong> machine and focus it. Move the remote cursor over the
+      grid, click/drag/wheel, and type. Every event is logged below; optionally POST it to a local log server.
+      Start the receiver with <code>npm run log-server</code>.
+    </p>
+
+    <div class="panel" style="margin-bottom: 12px">
+      <label>
+        <input id="post-events" type="checkbox" />
+        POST events to
+      </label>
+      <input id="post-url" value="http://127.0.0.1:8787/event" style="width: min(420px, 70%); font-family: monospace" />
+      <button id="clear" type="button">Clear log</button>
+      <span id="post-status" class="muted"></span>
+    </div>
+
+    <div class="row">
+      <section class="panel">
+        <h2 style="font-size: 1rem">Coordinate grid</h2>
+        <div id="grid" tabindex="0" aria-label="Remote input coordinate grid">
+          <span class="axis" style="left: 4px; top: 4px">0,0</span>
+          <span class="axis" style="right: 4px; top: 4px">100%,0</span>
+          <span class="axis" style="left: 4px; bottom: 4px">0,100%</span>
+          <span class="axis" style="right: 4px; bottom: 4px">100%,100%</span>
+        </div>
+        <p class="muted" id="cursor-readout">cursor: –</p>
+      </section>
+
+      <section class="panel">
+        <h2 style="font-size: 1rem">Keyboard / IME / clipboard</h2>
+        <textarea id="text" placeholder="Type or use your IME here…" autocomplete="off"></textarea>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap">
+          <button id="read-clipboard" type="button">Read clipboard</button>
+          <span id="clipboard" class="muted">clipboard: –</span>
+        </div>
+        <p class="muted">Paste into the textarea to test remote→local clipboard; focus it to test IME.</p>
+      </section>
+    </div>
+
+    <section class="panel" style="margin-top: 12px">
+      <h2 style="font-size: 1rem">Event log</h2>
+      <div id="log" aria-live="polite"></div>
+    </section>
+
+    <script>
+      const logEl = document.getElementById('log');
+      const grid = document.getElementById('grid');
+      const text = document.getElementById('text');
+      const postEvents = document.getElementById('post-events');
+      const postUrl = document.getElementById('post-url');
+      const postStatus = document.getElementById('post-status');
+      const cursorReadout = document.getElementById('cursor-readout');
+      const clipboardEl = document.getElementById('clipboard');
+
+      const MAX_LINES = 500;
+
+      function now() {
+        return new Date().toISOString().slice(11, 23);
+      }
+
+      const pending = [];
+      let flushTimer;
+      function queuePost(event) {
+        if (!postEvents.checked) return;
+        pending.push(event);
+        if (pending.length > 100) pending.shift();
+        if (flushTimer) return;
+        flushTimer = setTimeout(() => {
+          flushTimer = undefined;
+          const batch = pending.splice(0);
+          if (!batch.length) return;
+          fetch(postUrl.value, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(batch),
+          }).then(
+            () => { postStatus.textContent = `posted ${batch.length}`; },
+            (error) => { postStatus.textContent = `post failed: ${error}`; },
+          );
+        }, 250);
+      }
+
+      function log(kind, detail) {
+        const line = document.createElement('div');
+        line.textContent = `${now()}  ${kind.padEnd(16)} ${detail}`;
+        logEl.append(line);
+        while (logEl.childElementCount > MAX_LINES) logEl.firstElementChild.remove();
+        logEl.scrollTop = logEl.scrollHeight;
+        queuePost({ time: Date.now(), kind, detail });
+      }
+
+      function gridPoint(event) {
+        const rect = grid.getBoundingClientRect();
+        const x = Math.round(((event.clientX - rect.left) / rect.width) * 1000) / 10;
+        const y = Math.round(((event.clientY - rect.top) / rect.height) * 1000) / 10;
+        return { x, y, px: Math.round(event.clientX - rect.left), py: Math.round(event.clientY - rect.top) };
+      }
+
+      function mark(point) {
+        const dot = document.createElement('div');
+        dot.className = 'dot';
+        dot.style.left = `${point.x}%`;
+        dot.style.top = `${point.y}%`;
+        grid.append(dot);
+        while (grid.querySelectorAll('.dot').length > 30) grid.querySelector('.dot').remove();
+      }
+
+      let lastMove = 0;
+      grid.addEventListener('mousemove', (event) => {
+        const point = gridPoint(event);
+        cursorReadout.textContent = `cursor: x=${point.x}% y=${point.y}% (${point.px}, ${point.py}px)`;
+        const time = performance.now();
+        if (time - lastMove > 120) {
+          lastMove = time;
+          log('mousemove', `x=${point.x}% y=${point.y}% buttons=${event.buttons}`);
+        }
+      });
+      grid.addEventListener('mousedown', (event) => {
+        const point = gridPoint(event);
+        mark(point);
+        log('mousedown', `button=${event.button} buttons=${event.buttons} x=${point.x}% y=${point.y}%`);
+      });
+      grid.addEventListener('mouseup', (event) => {
+        const point = gridPoint(event);
+        log('mouseup', `button=${event.button} buttons=${event.buttons} x=${point.x}% y=${point.y}%`);
+      });
+      grid.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        log('contextmenu', 'prevented');
+      });
+      grid.addEventListener(
+        'wheel',
+        (event) => {
+          event.preventDefault();
+          log('wheel', `dx=${event.deltaX} dy=${event.deltaY} mode=${event.deltaMode}`);
+        },
+        { passive: false },
+      );
+      grid.addEventListener('touchstart', (event) => {
+        const touch = event.touches[0];
+        if (!touch) return;
+        const rect = grid.getBoundingClientRect();
+        log('touchstart', `x=${touch.clientX - rect.left} y=${touch.clientY - rect.top} touches=${event.touches.length}`);
+      });
+      grid.addEventListener('touchmove', (event) => {
+        const touch = event.touches[0];
+        if (!touch) return;
+        const rect = grid.getBoundingClientRect();
+        log('touchmove', `x=${touch.clientX - rect.left} y=${touch.clientY - rect.top} touches=${event.touches.length}`);
+      });
+      grid.addEventListener('touchend', (event) => {
+        log('touchend', `touches=${event.touches.length}`);
+      });
+
+      window.addEventListener('keydown', (event) => {
+        log(
+          'keydown',
+          `code=${event.code} key=${JSON.stringify(event.key)} repeat=${event.repeat} ` +
+            `ctrl=${event.ctrlKey} alt=${event.altKey} shift=${event.shiftKey} meta=${event.metaKey}`,
+        );
+      });
+      window.addEventListener('keyup', (event) => {
+        log('keyup', `code=${event.code} key=${JSON.stringify(event.key)}`);
+      });
+      text.addEventListener('input', (event) => {
+        log('input', `value=${JSON.stringify(event.target.value)} isComposing=${event.isComposing}`);
+      });
+      text.addEventListener('compositionstart', () => log('compositionstart', ''));
+      text.addEventListener('compositionupdate', (event) => log('compositionupdate', JSON.stringify(event.data)));
+      text.addEventListener('compositionend', (event) => log('compositionend', JSON.stringify(event.data)));
+      text.addEventListener('paste', (event) => {
+        const pasted = event.clipboardData?.getData('text') ?? '';
+        log('paste', JSON.stringify(pasted));
+      });
+
+      document.getElementById('read-clipboard').addEventListener('click', async () => {
+        try {
+          const value = await navigator.clipboard.readText();
+          clipboardEl.textContent = `clipboard: ${JSON.stringify(value)}`;
+          log('clipboard', JSON.stringify(value));
+        } catch (error) {
+          clipboardEl.textContent = `clipboard: unavailable (${error})`;
+          log('clipboard-error', String(error));
+        }
+      });
+
+      document.getElementById('clear').addEventListener('click', () => {
+        logEl.replaceChildren();
+        for (const dot of grid.querySelectorAll('.dot')) dot.remove();
+      });
+
+      log('ready', 'focus the grid and use the remote controller');
+    </script>
+  </body>
+</html>

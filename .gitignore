@@ -24,6 +24,9 @@ coverage/
 # Demo copies of decoder assets (source of truth: assets/ogv/, `npm run copy-assets`)
 demo/public/rustdesk-assets/
 
+# Local development servers (isolated keys/data; never the user's RustDesk data)
+.local/
+
 # Python cache (if using Python projects)
 __pycache__/
 *.pyc
