@@ -48,6 +48,10 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   `tests/protocol.test.ts` 用 `tests/fixtures/v1-protobuf.json`（由未修改的
   v1 模块生成）校验字节一致性与未知字段跳过。
 - 来源、修改清单与 AGPL 声明：`NOTICE`、`src/protocol/NOTICE.md`、根 `LICENSE`。
+- `src/protocol/url.ts`：与官方 v2 `getUriFromRs` 一致的 URL 构造
+  （HTTPS 反代路径 `/ws/id`、`/ws/relay`；显式端口 +2 / relay +3 或 +2），
+  并校验 `rendezvousUrl`/`relayUrl` 显式覆盖（仅 `ws(s)://`、HTTPS 页面禁止
+  `ws://`）。
 
 ## 开发
 
