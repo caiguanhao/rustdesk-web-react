@@ -163,7 +163,10 @@ export class MockRustDeskServer {
   rendezvousPort = 0;
   relayPort = 0;
   loggedIn = false;
+  videoAcks = 0;
+  refreshRequests = 0;
   peerError: unknown;
+  private peerSend: ((partial: DeepPartial<message.Message>) => void) | undefined;
 
   private readonly options: Required<
     Pick<
@@ -225,6 +228,24 @@ export class MockRustDeskServer {
 
   get relayServer(): string {
     return `127.0.0.1:${this.relayPort - 2}`;
+  }
+
+  /** Send one VideoFrame batch from the controlled peer (after login). */
+  sendVideo(frames: { key: boolean; data?: number[] }[]): void {
+    if (!this.peerSend) throw new Error('mock peer is not logged in yet');
+    this.peerSend({
+      video_frame: {
+        timestamp: Date.now(),
+        display: 0,
+        vp9s: {
+          frames: frames.map((frame, index) => ({
+            data: Uint8Array.from(frame.data ?? [index + 1]),
+            key: frame.key,
+            pts: index,
+          })),
+        },
+      },
+    });
   }
 
   async close(): Promise<void> {
@@ -498,22 +519,18 @@ export class MockRustDeskServer {
           }
           send({ login_response: { peer_info: this.peerInfo } });
           this.loggedIn = true;
+          this.peerSend = send;
           if (this.options.sendVideoFrame) {
-            send({
-              video_frame: {
-                timestamp: 1,
-                vp9s: {
-                  frames: [
-                    {
-                      data: Uint8Array.from([0, 0, 0, 0, 1, 2, 3, 4]),
-                      key: true,
-                      pts: 0,
-                    },
-                  ],
-                },
-              },
-            });
+            this.sendVideo([{ key: true, data: [0, 0, 0, 0, 1, 2, 3, 4] }]);
           }
+          continue;
+        }
+        if (msg.misc?.video_received) {
+          this.videoAcks += 1;
+          continue;
+        }
+        if (msg.misc?.refresh_video) {
+          this.refreshRequests += 1;
           continue;
         }
         if (msg.test_delay) continue;

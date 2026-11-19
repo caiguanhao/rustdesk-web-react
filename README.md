@@ -125,6 +125,13 @@ npm run dev        # demo，http://localhost:5173
 - 浏览器验收：`npm run test:decoder`（需要本机 Chrome）在 headless Chrome
   中用两套真实 WASM 各解码 200 个 VP9 keyframe；测试页面为
   `demo/decoder-check.html`。
+- `src/media/video-pipeline.ts`：有界帧队列（默认 8）+ 单路串行解码；每批
+  `VideoFrame` 都回 `Misc{video_received}`（含丢弃批次），丢帧/解码失败后进入
+  `awaitingKeyframe` 并限频发送 `Misc{refresh_video}`，直到 keyframe 恢复；
+  页面隐藏时停止解码，恢复时清队列并强制请求 keyframe。sink 的
+  `draw(frame, release)` 绘制后调用 `release()`（幂等，pipeline 兜底回收）；
+  非 VP9 帧报 `unsupportedCodec` 并建议重连。mock peer 集成测试验证 ack/
+  refresh，见 `tests/mock-server.test.ts`。
 
 ## 本机 Docker 真连环境（P1-9）
 

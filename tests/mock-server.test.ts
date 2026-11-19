@@ -7,6 +7,8 @@ import {
   type RendezvousConnectOptions,
 } from '../src/protocol/connection';
 import { LoginFlow } from '../src/protocol/login';
+import type { Vp9Frame } from '../src/media/vp9-decoder';
+import { VideoPipeline } from '../src/media/video-pipeline';
 import * as message from '../src/protocol/message';
 import { WebSock, type WebSocketLike, type WebSockCloseEvent } from '../src/protocol/websock';
 import type { RustDeskStatusEvent } from '../src/session/state';
@@ -125,6 +127,65 @@ describe('mock hbbs/hbbr/peer integration', () => {
     } finally {
       flow?.dispose();
       connection?.close();
+      await mock.close();
+    }
+  });
+
+  it('acks every video batch and requests a keyframe after a drop', async () => {
+    const mock = await MockRustDeskServer.start({ sendVideoFrame: false });
+    let connection: RelayConnection | undefined;
+    let flow: LoginFlow | undefined;
+    let pipeline: VideoPipeline | undefined;
+    let reader: Promise<void> | undefined;
+    try {
+      const conn = await connectRelay(connectionOptions(mock));
+      connection = conn;
+      flow = new LoginFlow(conn, {
+        peerId: mock.peerId,
+        password: mock.password,
+        loginTimeoutMs: 2000,
+      });
+      await flow.start();
+      await waitFor(() => mock.loggedIn);
+
+      const decoded: number[] = [];
+      pipeline = new VideoPipeline({
+        decoder: {
+          decode: async (data): Promise<Vp9Frame> => {
+            decoded.push(data[0] ?? -1);
+            return { width: 1, height: 1 };
+          },
+          recycle: () => {},
+        },
+        channel: conn,
+        sink: { draw: () => {} },
+      });
+      reader = (async () => {
+        for (;;) {
+          const msg = await conn.nextMessage(5000);
+          if (msg.video_frame) pipeline!.push(msg.video_frame);
+        }
+      })().catch(() => undefined);
+
+      // The pipeline starts awaiting a keyframe: a delta-only batch is acked
+      // and triggers a refresh, but is not decoded.
+      mock.sendVideo([{ key: false, data: [9] }]);
+      await waitFor(() => mock.videoAcks === 1 && mock.refreshRequests >= 1);
+      expect(decoded).toEqual([]);
+
+      mock.sendVideo([
+        { key: true, data: [1] },
+        { key: false, data: [2] },
+      ]);
+      await waitFor(() => mock.videoAcks === 2 && decoded.length === 2);
+      await pipeline.idle();
+      expect(decoded).toEqual([1, 2]);
+      expect(pipeline.awaitingKeyframe).toBe(false);
+    } finally {
+      pipeline?.dispose();
+      flow?.dispose();
+      connection?.close();
+      await reader;
       await mock.close();
     }
   });
