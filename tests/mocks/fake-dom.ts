@@ -5,6 +5,8 @@ import { vi } from 'vitest';
 // the encrypted relay tests use these stubs instead.
 
 export class FakeElement extends EventTarget {
+  readonly style: Record<string, string> = {};
+
   constructor(private readonly rect: DOMRect) {
     super();
   }

@@ -22,10 +22,15 @@
  * sync on display switches). Down/up carry 0,0 but are always preceded by a
  * move so the peer cursor is at the click point.
  */
-import type { RendererLayout } from '../media/renderer.js';
 import type { RelayConnection } from '../protocol/connection.js';
 import { ControlKey } from '../protocol/message.js';
 import { RustDeskError } from '../session/errors.js';
+import {
+  mapClientPoint,
+  type RemoteCoordinateMapper,
+} from './coordinates.js';
+
+export type { RemoteCoordinateMapper, RemotePoint } from './coordinates.js';
 
 export const MOUSE_TYPE = { move: 0, down: 1, up: 2, wheel: 3 } as const;
 export const MOUSE_BUTTON = {
@@ -41,10 +46,16 @@ export type MouseButtonBit = (typeof MOUSE_BUTTON)[keyof typeof MOUSE_BUTTON];
 
 export type MouseChannel = Pick<RelayConnection, 'sendMessage'>;
 
-/** Structural subset of VideoRenderer used by the encoder. */
-export interface RemoteCoordinateMapper {
-  readonly layout: RendererLayout | null;
-  toRemote(clientX: number, clientY: number): { x: number; y: number } | null;
+/** Display origin from PeerInfo, defaulting invalid/missing components to 0. */
+export function normalizeOrigin(
+  origin?: { x: number; y: number },
+): { x: number; y: number } {
+  const x = origin?.x;
+  const y = origin?.y;
+  return {
+    x: x !== undefined && Number.isFinite(x) ? x : 0,
+    y: y !== undefined && Number.isFinite(y) ? y : 0,
+  };
 }
 
 export interface MouseInputOptions {
@@ -110,8 +121,34 @@ export function wheelToMouseDelta(
   return { x: 0, y: 0 };
 }
 
-const clampCoordinate = (value: number, max: number): number | null =>
-  Number.isFinite(value) ? Math.min(max, Math.max(0, Math.round(value))) : null;
+/**
+ * Send one MouseEvent message, converting a closed relay/channel into a
+ * `connection-lost` error. Shared by the mouse and touch encoders; host
+ * callbacks must never throw back into DOM event handlers.
+ */
+export function sendMouseEvent(
+  channel: MouseChannel,
+  type: MouseMessageType,
+  mask: number,
+  x: number,
+  y: number,
+  modifiers: ControlKey[],
+  onError?: (error: RustDeskError) => void,
+): void {
+  try {
+    channel.sendMessage({ mouse_event: { mask, x, y, modifiers } });
+  } catch (cause) {
+    try {
+      onError?.(
+        new RustDeskError('connection-lost', `Failed to send mouse ${type}`, {
+          cause,
+        }),
+      );
+    } catch {
+      // Host callbacks must not break input handling.
+    }
+  }
+}
 
 export class MouseInput {
   private readonly element: HTMLElement;
@@ -129,12 +166,7 @@ export class MouseInput {
     this.element = options.element;
     this.mapper = options.mapper;
     this.channel = options.channel;
-    const originX = options.origin?.x;
-    const originY = options.origin?.y;
-    this.origin = {
-      x: originX !== undefined && Number.isFinite(originX) ? originX : 0,
-      y: originY !== undefined && Number.isFinite(originY) ? originY : 0,
-    };
+    this.origin = normalizeOrigin(options.origin);
     this.enabledValue = options.enabled ?? true;
     this.preventContextMenu = options.preventContextMenu ?? true;
     this.onError = options.onError;
@@ -152,10 +184,7 @@ export class MouseInput {
 
   /** Update the origin after a display switch (P4-1 owns PeerInfo). */
   setOrigin(origin: { x: number; y: number }): void {
-    this.origin = {
-      x: Number.isFinite(origin.x) ? origin.x : 0,
-      y: Number.isFinite(origin.y) ? origin.y : 0,
-    };
+    this.origin = normalizeOrigin(origin);
   }
 
   attach(): void {
@@ -198,7 +227,12 @@ export class MouseInput {
     event.preventDefault();
     if (!this.enabledValue) return;
 
-    const position = this.position(event.clientX, event.clientY, false);
+    const position = mapClientPoint(
+      this.mapper,
+      this.element,
+      event.clientX,
+      event.clientY,
+    );
     if (!position) return;
     // Down/up coordinates are ignored by the peer; move first so the click
     // lands where the local pointer is even if hover events were missed.
@@ -210,13 +244,24 @@ export class MouseInput {
 
   private readonly onHoverMove = (event: MouseEvent): void => {
     if (!this.enabledValue || this.buttons !== 0) return;
-    const position = this.position(event.clientX, event.clientY, false);
+    const position = mapClientPoint(
+      this.mapper,
+      this.element,
+      event.clientX,
+      event.clientY,
+    );
     if (position) this.sendMove(position, 0);
   };
 
   private readonly onDragMove = (event: MouseEvent): void => {
     if (!this.enabledValue || this.buttons === 0) return;
-    const position = this.position(event.clientX, event.clientY, true);
+    const position = mapClientPoint(
+      this.mapper,
+      this.element,
+      event.clientX,
+      event.clientY,
+      true,
+    );
     if (position) this.sendMove(position, this.buttons);
   };
 
@@ -258,33 +303,6 @@ export class MouseInput {
     }
   };
 
-  private position(
-    clientX: number,
-    clientY: number,
-    clampToEdge: boolean,
-  ): { x: number; y: number } | null {
-    const layout = this.mapper.layout;
-    if (!layout || layout.width <= 0 || layout.height <= 0) return null;
-
-    let remote = this.mapper.toRemote(clientX, clientY);
-    if (!remote && clampToEdge) {
-      const rect = this.element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return null;
-      // Snap just inside the canvas so the renderer's transform stays the
-      // single source of truth for the rect → frame mapping.
-      remote = this.mapper.toRemote(
-        Math.min(Math.max(clientX, rect.left), rect.right - 0.001),
-        Math.min(Math.max(clientY, rect.top), rect.bottom - 0.001),
-      );
-    }
-    if (!remote) return null;
-
-    const x = clampCoordinate(remote.x, layout.width - 1);
-    const y = clampCoordinate(remote.y, layout.height - 1);
-    if (x === null || y === null) return null;
-    return { x, y };
-  }
-
   /** `buttonBits` is the unshifted RustDesk button mask (e.g. left = 1). */
   private sendMove(position: { x: number; y: number }, buttonBits: number): void {
     this.send(
@@ -313,22 +331,6 @@ export class MouseInput {
     y: number,
     modifiers: ControlKey[],
   ): void {
-    try {
-      this.channel.sendMessage({ mouse_event: { mask, x, y, modifiers } });
-    } catch (cause) {
-      this.report(
-        new RustDeskError('connection-lost', `Failed to send mouse ${type}`, {
-          cause,
-        }),
-      );
-    }
-  }
-
-  private report(error: RustDeskError): void {
-    try {
-      this.onError?.(error);
-    } catch {
-      // Host callbacks must not break input handling.
-    }
+    sendMouseEvent(this.channel, type, mask, x, y, modifiers, this.onError);
   }
 }

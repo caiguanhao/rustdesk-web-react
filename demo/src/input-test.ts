@@ -6,6 +6,11 @@ import { VP9_FIXTURES } from '../../test-fixtures/vp9';
 import { ImeInput, type ViewportInfo } from '../../src/input/ime';
 import { KeyboardInput } from '../../src/input/keyboard';
 import { MouseInput } from '../../src/input/mouse';
+import {
+  TouchInput,
+  type LocalZoomState,
+  type TouchGesture,
+} from '../../src/input/touch';
 import type {
   DeepPartial,
   KeyEvent,
@@ -43,6 +48,12 @@ export interface InputTestApi {
   setImeEnabled(enabled: boolean): void;
   imeFocused: boolean;
   viewport?: ViewportInfo;
+  gestures: TouchGesture[];
+  localZoom: LocalZoomState;
+  clearGestures(): void;
+  setMouseEnabled(enabled: boolean): void;
+  setTouchEnabled(enabled: boolean): void;
+  resetTouchZoom(): void;
   lastContextMenuPrevented?: boolean;
   lastKeyDownPrevented?: boolean;
 }
@@ -66,6 +77,30 @@ const recordKey = {
   },
 };
 
+const recordMouse = {
+  sendMessage(payload: DeepPartial<Message>) {
+    const event = payload.mouse_event;
+    if (!event) return;
+    messages.push({
+      mask: event.mask ?? 0,
+      x: event.x ?? 0,
+      y: event.y ?? 0,
+      modifiers: [...(event.modifiers ?? [])],
+    });
+  },
+};
+
+const gestures: TouchGesture[] = [];
+const touch = new TouchInput({
+  element: canvas,
+  mapper: renderer,
+  channel: recordMouse,
+  onGesture: (gesture) => gestures.push(gesture),
+  onLocalZoom: (state) => {
+    api.localZoom = state;
+  },
+});
+
 const keyboard = new KeyboardInput({
   channel: recordKey,
   platform: 'Windows',
@@ -87,6 +122,8 @@ const api: InputTestApi = {
   messages,
   keys,
   imeFocused: false,
+  gestures,
+  localZoom: { scale: 1, translateX: 0, translateY: 0 },
   clear: () => {
     messages.length = 0;
   },
@@ -104,24 +141,19 @@ const api: InputTestApi = {
   sendLockScreen: () => keyboard.sendLockScreen(),
   focusIme: () => ime.focus(),
   setImeEnabled: (enabled) => ime.setEnabled(enabled),
+  clearGestures: () => {
+    gestures.length = 0;
+  },
+  setMouseEnabled: (enabled) => mouse.setEnabled(enabled),
+  setTouchEnabled: (enabled) => touch.setEnabled(enabled),
+  resetTouchZoom: () => touch.resetLocalZoom(),
 };
 window.inputTest = api;
 
 const mouse = new MouseInput({
   element: canvas,
   mapper: renderer,
-  channel: {
-    sendMessage(payload) {
-      const event = payload.mouse_event;
-      if (!event) return;
-      messages.push({
-        mask: event.mask ?? 0,
-        x: event.x ?? 0,
-        y: event.y ?? 0,
-        modifiers: [...(event.modifiers ?? [])],
-      });
-    },
-  },
+  channel: recordMouse,
 });
 
 document.addEventListener('contextmenu', (event) => {
@@ -139,6 +171,7 @@ async function start(): Promise<void> {
   mouse.attach();
   keyboard.attach();
   ime.attach();
+  touch.attach();
   // Registered after KeyboardInput so it observes its preventDefault call.
   document.addEventListener('keydown', (event) => {
     api.lastKeyDownPrevented = event.defaultPrevented;

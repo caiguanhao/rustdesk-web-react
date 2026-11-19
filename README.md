@@ -199,7 +199,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 4 个 Playwright 测试：
+  Chromium/Chrome，当前跑 5 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -209,7 +209,9 @@ npm run dev          # demo，http://localhost:5173
   3. 同一页面用真实 `page.keyboard` 验证物理键码、修饰键、repeat、平台切换
      与 CtrlAltDel/LockScreen（P3-2）；
   4. 同一页面验证隐藏 textarea 的 insertText、合成 composition、paste、
-     visualViewport 通知，以及 IME 聚焦时物理键仍走 Map 模式（P3-3）。
+     visualViewport 通知，以及 IME 聚焦时物理键仍走 Map 模式（P3-3）；
+  5. 同一页面用 `hasTouch` + CDP 多指触摸验证 tap/双击/长按/拖动/双指滚动/
+     捏合本地缩放、`touch-action:none` 不滚页面、禁用和画布黑边（P3-4）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -242,8 +244,9 @@ npm run dev          # demo，http://localhost:5173
   取反过的 web core bridge；真机方向仍待验收。
 - `enabled`/`setEnabled()` 是 P3-6/readOnly 的本地开关；禁用时释放按钮并停止
   发送。P4-1 负责把 `PeerInfo` 的显示原点、会话 channel、切换期间的门控接上；
-  P4-3 负责 canvas attach/detach；P3-4 触摸必须与本模块互斥或过滤触摸合成
-  的鼠标事件。
+  P4-3 负责 canvas attach/detach。P3-4 触摸可与本模块并存（只处理非 mouse
+  指针并通过 `preventDefault` 抑制兼容鼠标事件）；P4-3 的 viewOnly 仍需同时
+  禁用两者。
 - 验证：`tests/input-mouse.test.ts`（20 项 jsdom：mask/坐标/修饰键/滚轮/
   双击/拖拽/默认行为/启用禁用/清理/错误）、
   `tests/input-mouse-integration.test.ts`（Node 假 DOM + 真实 mock
@@ -318,6 +321,46 @@ npm run dev          # demo，http://localhost:5173
   结束时序（尾随 input 若在 0ms 后到达可能重复）与 visualViewport 布局需要
   真机。与 P3-1/P3-2 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按
   规则未重复发通知；P3-3 暂不勾选。
+
+## 触摸手势（P3-4，⏳ 真机待验）
+
+- `src/input/touch.ts` 的 `TouchInput` 只监听 Pointer Events，忽略
+  `pointerType === 'mouse'`，因此可与 P3-1 同时挂载（混合设备）。attach 时
+  设置 `touch-action:none`（detach 恢复原 inline 值），对 pointer/touch/
+  Safari gesture 事件使用非 passive 监听并 `preventDefault()`，阻止页面
+  缩放/滚动和 Chromium 的兼容鼠标事件；Playwright 同时挂载 MouseInput 的
+  场景验证一次 tap 仍只有 3 条 MouseEvent。
+- 手势（桌面被控端，发送 `mouse_event`）：tap = move + left down/up；
+  双击 = 两组 down/up（由对端 OS 识别）并额外回调 `double-tap`；长按 500ms
+  = 右键 down/up；单指拖动 = 左键按下/移动/释放（`mode:'touch'`）；双指
+  滚动 = wheel（复用 P3-1 的取反 ±1 刻度）；双指捏合 = 本地 CSS transform
+  `translate(...) scale(...)`（origin 0 0，scale 1–4），不发任何远端消息。
+  阈值均可配置：10 CSS px tap/drag slop（无死区）、300ms/30 CSS px 双击、
+  24px 滚动刻度、10px 捏合阈值。
+- `mode:'mouse'` 只移动光标、不按左键（点按仍点击，长按仍右键）；完整上游
+  mouse mode（双指右键、按住拖动）与真机手感留待真机/P5 调整。长按右键是
+  桌面被控端行为；Android 被控端的 `PointerDeviceEvent` 触控协议未在
+  vendored codec 中实现，MVP 明确只面向桌面被控端，P4-1 不应把 TouchInput
+  接到 Android 对端而假装原生触摸。
+- 双指模式判定比较“沿初始两指连线方向的位移”和“质心位移”：前者超过 10px
+  且大于后者才进入捏合，否则质心累计超过 24px 进入滚动。这样两指滚动时
+  先动一根手指（交错的 pointermove）不会误判为捏合；已有单测覆盖，具体
+  数值/优先级仍需真机调优。
+- 坐标复用 `src/input/coordinates.ts` 的 `mapClientPoint`（P3-1 已抽出）并
+  加 display 原点；拖出画布贴边。双指手势结束后剩余手指被抑制，不会补发
+  tap/click；pointercancel/blur/页面隐藏/disable/detach 都会释放左键、清
+  定时器并恢复样式。P4-3 应通过 `applyLocalZoom:false` + `onLocalZoom`
+  接管 transform，并负责缩放后的平移/边界/重置 UI（当前“已缩放状态下新的
+  双指拖动”仍是远端滚动，不会本地平移）以及 display/会话切换时重置。
+- 验证：`tests/input-touch.test.ts`（16 项 jsdom：手势序列、双击 CSS 距离、
+  交错滚动、模式、缩放、释放、样式恢复、默认行为、坐标/原点、错误）、
+  `tests/input-touch-integration.test.ts`（Node 假 DOM + 真实 mock
+  hbbs/hbbr/peer 加密链路，tap/drag/双指滚动）、`tests/e2e/touch.spec.ts`
+  （Playwright `hasTouch` + CDP 多指：tap/双击/长按/拖动/捏合/双指滚动/
+  禁用/黑边）。
+- ⏳ 真机待验：真实 iPhone/Android 的手势识别、slop、滚动/捏合切换、合成
+  鼠标过滤与软键盘共存需要真机。与 P3-1/P3-2/P3-3 同一阻塞（无 P4-1/P4-3
+  接线、无获授权真实环境），按规则未重复发通知；P3-4 暂不勾选。
 
 ## 本机 Docker 真连环境（P1-9）
 
