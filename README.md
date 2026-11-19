@@ -724,6 +724,13 @@ npm run dev          # demo，http://localhost:5173
 - 数据来自本地合成 keyframe/管线，不是远程网络或真机；P5-1/P5-2/P5-5 仍需
   真机/授权验收。
 
+## 故障场景（P5-4，已完成）
+
+7 类故障（密码错误/对端离线/server key 错误/不可达/close_reason/网络中断/
+反代 1009）已用 mock hbbs/hbbr/peer 与实际 WebSocket close 覆盖；错误码、UI 与
+测试映射见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。这不是真机/最终
+验收；P5-1/P5-2 真机与 P5-5 授权只读会话仍未完成。
+
 ## 本机 Docker 真连环境（P1-9）
 
 不依赖用户现有服务器/客户端，也不使用用户已安装的 RustDesk 配置：

@@ -1,3 +1,5 @@
+import { once } from 'node:events';
+import { createServer, type AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket as WsClient } from 'ws';
 import type { RemoteClipboardEvent } from '../src/input/clipboard';
@@ -33,20 +35,22 @@ interface Harness {
 }
 
 function makeHarness(
-  mock: MockRustDeskServer,
+  mock: MockRustDeskServer | undefined,
   config: Partial<RustDeskSessionConfig> = {},
 ): Harness {
   const statuses: RustDeskStatusEvent[] = [];
   const errors: RustDeskError[] = [];
   const clipboards: RemoteClipboardEvent[] = [];
+  const base: RustDeskSessionConfig = mock
+    ? {
+        server: mock.server,
+        serverKey: mock.serverKey,
+        id: mock.peerId,
+        password: mock.password,
+      }
+    : { server: '127.0.0.1:1', id: 'unreachable' };
   const session = new RustDeskSession(
-    {
-      server: mock.server,
-      serverKey: mock.serverKey,
-      id: mock.peerId,
-      password: mock.password,
-      ...config,
-    },
+    { ...base, ...config },
     {
       secure: false,
       createSocket,
@@ -59,6 +63,16 @@ function makeHarness(
   session.on('clipboard', (event) => clipboards.push(event));
   sessions.push(session);
   return { session, statuses, errors, clipboards };
+}
+
+/** Bind and release an ephemeral TCP port, then return it (no listener). */
+async function unusedPort(): Promise<number> {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const { port } = server.address() as AddressInfo;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
 }
 
 describe('RustDeskSession over the mock relay', () => {
@@ -148,6 +162,86 @@ describe('RustDeskSession over the mock relay', () => {
       expect(info.username).toBe('alice');
       expect(harness.session.status).toBe('connected');
       expect(mock.loginRequests).toHaveLength(2);
+    } finally {
+      await mock.close();
+    }
+  });
+});
+
+describe('failure scenarios (P5-4)', () => {
+  async function expectFailure(
+    harness: Harness,
+    code: string,
+  ): Promise<void> {
+    await expect(harness.session.connect()).rejects.toMatchObject({ code });
+    expect(harness.statuses.at(-1)).toMatchObject({ status: 'error' });
+    expect(harness.errors.at(-1)).toMatchObject({ code });
+  }
+
+  it('reports an offline peer', async () => {
+    const mock = await MockRustDeskServer.start({ mode: 'offline' });
+    try {
+      await expectFailure(makeHarness(mock), 'peer-offline');
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('reports a wrong server key', async () => {
+    const mock = await MockRustDeskServer.start();
+    try {
+      await expectFailure(
+        makeHarness(mock, {
+          serverKey: Buffer.from(new Uint8Array(32).fill(0x77)).toString(
+            'base64',
+          ),
+        }),
+        'server-key-invalid',
+      );
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('reports an unreachable server', async () => {
+    const port = await unusedPort();
+    const harness = makeHarness(undefined, {
+      rendezvousUrl: `ws://127.0.0.1:${port}/ws/id`,
+      relayUrl: `ws://127.0.0.1:${port}/ws/relay`,
+    });
+    await expectFailure(harness, 'server-unreachable');
+  });
+
+  it('reports a reverse-proxy 1009 during the session', async () => {
+    const mock = await MockRustDeskServer.start({
+      maxRelayBytes: 512,
+      sendVideoFrame: false,
+    });
+    try {
+      const harness = makeHarness(mock);
+      await harness.session.connect();
+      harness.session.sendMessage({
+        key_event: { down: true, seq: 'x'.repeat(2000), modifiers: [] },
+      });
+      await waitFor(() => harness.session.status === 'error', 2000);
+      expect(harness.errors.at(-1)).toMatchObject({ code: 'message-too-large' });
+      expect(harness.statuses.at(-1)).toMatchObject({ status: 'error' });
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('reports a server shutdown after connect as connection-lost', async () => {
+    const mock = await MockRustDeskServer.start({ sendVideoFrame: false });
+    try {
+      const harness = makeHarness(mock);
+      await harness.session.connect();
+      expect(harness.session.status).toBe('connected');
+
+      await mock.close();
+      await waitFor(() => harness.session.status === 'error', 2000);
+      expect(harness.errors.at(-1)).toMatchObject({ code: 'connection-lost' });
+      expect(harness.statuses.at(-1)).toMatchObject({ status: 'error' });
     } finally {
       await mock.close();
     }

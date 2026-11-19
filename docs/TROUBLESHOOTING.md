@@ -3,6 +3,27 @@
 先看浏览器 Console 和 viewer 覆盖层/`onError` 的 `RustDeskError.code`，再看
 hbbs/hbbr/反代日志。不要打印 config（尤其 password/serverKey）或完整 env 文件。
 
+## P5-4 自动验证矩阵
+
+除密码错误外，失败都产生 `status:error` + `error` 事件的 `RustDeskError.code`；
+viewer 使用通用覆盖层：错误消息 + Retry、断开 + detail + Connect、密码表单 +
+retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/password
+用例覆盖（不按 code 定制）。这些场景由 mock hbbs/hbbr/peer 与实际 WebSocket 关闭
+码驱动，不需要真机。
+
+| 场景 | 类型化结果 | 测试 |
+| --- | --- | --- |
+| 密码错误 | `password-required{retry:true, detail}`（不是 `error`，同一 Hash 重试） | `tests/login.test.ts`（same Hash）、`tests/session-integration.test.ts`、viewer 表单 |
+| 对端离线 | `peer-offline` | `tests/mock-server.test.ts`、`tests/session-integration.test.ts` |
+| server key 错误 | `server-key-invalid` | `tests/mock-server.test.ts`、`tests/secure.test.ts`、session failure |
+| 服务器不可达 | `server-unreachable`（或静默丢包时 `timeout`） | `tests/websock.test.ts`、`tests/session-integration.test.ts` |
+| 对端 close_reason | 登录后 `disconnected{detail}`；登录前 `error`+`peer-closed` | `tests/session-integration.test.ts`、`tests/session.test.ts`（登录后）、`tests/login.test.ts`/`tests/secure.test.ts`（登录前）、viewer disconnected |
+| 网络中断 | 收到 close → `connection-lost`；无 close 的静默丢包 → `timeout` | `tests/session-integration.test.ts`（server shutdown）、`tests/session.test.ts`（read timeout）、`tests/websock.test.ts` |
+| 反代 1009 | `message-too-large` | `tests/websock.test.ts`、`tests/mock-server.test.ts`（hbbr）、`tests/session-integration.test.ts`（mid-session） |
+
+密码错误被设计为状态而非错误，以便同一连接/同一 Hash 重试；其余失败都可在宿主的
+`onError` 中按 code 记录（不要记录密码/key）。
+
 ## 第一步：区分阶段
 
 | 现象 | 通常阶段 | 先检查 |

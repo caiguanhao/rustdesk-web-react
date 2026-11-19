@@ -352,6 +352,25 @@ describe('RustDeskViewer', () => {
     );
   });
 
+  it('shows a peer close reason and reconnects from Connect', async () => {
+    const connect = vi.mocked(RustDeskSession.prototype.connect);
+    connect.mockImplementation(function (this: RustDeskSession) {
+      session = this;
+      return Promise.resolve(PEER);
+    });
+    renderViewer({ autoConnect: true });
+    await connected();
+
+    act(() => {
+      emit('status', { status: 'disconnected', detail: 'maintenance' });
+    });
+
+    await screen.findByText('Disconnected');
+    expect(screen.getByText('maintenance')).toBeTruthy();
+    fireEvent.click(button('Connect'));
+    await waitFor(() => expect(connect.mock.calls.length).toBe(2));
+  });
+
   it('shows a typed error and reconnects from the retry button', async () => {
     let calls = 0;
     const connect = vi.mocked(RustDeskSession.prototype.connect);
