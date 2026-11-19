@@ -199,7 +199,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 5 个 Playwright 测试：
+  Chromium/Chrome，当前跑 6 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -211,7 +211,9 @@ npm run dev          # demo，http://localhost:5173
   4. 同一页面验证隐藏 textarea 的 insertText、合成 composition、paste、
      visualViewport 通知，以及 IME 聚焦时物理键仍走 Map 模式（P3-3）；
   5. 同一页面用 `hasTouch` + CDP 多指触摸验证 tap/双击/长按/拖动/双指滚动/
-     捏合本地缩放、`touch-action:none` 不滚页面、禁用和画布黑边（P3-4）。
+     捏合本地缩放、`touch-action:none` 不滚页面、禁用和画布黑边（P3-4）；
+  6. `demo/clipboard-test.html` 授予 clipboard-read/write 权限，验证真实浏览器
+     剪贴板的自动复制、压缩文本、点击读取本地剪贴板发送和失败后的手动复制（P3-5）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -361,6 +363,45 @@ npm run dev          # demo，http://localhost:5173
 - ⏳ 真机待验：真实 iPhone/Android 的手势识别、slop、滚动/捏合切换、合成
   鼠标过滤与软键盘共存需要真机。与 P3-1/P3-2/P3-3 同一阻塞（无 P4-1/P4-3
   接线、无获授权真实环境），按规则未重复发通知；P3-4 暂不勾选。
+
+## 剪贴板（P3-5，⏳ 真机待验）
+
+- `src/input/clipboard.ts` 的 `ClipboardController` 是框架无关的消息处理器：
+  P4-1 拥有 `nextMessage()` 循环并把每条消息交给 `handleMessage()`，本模块
+  不注册任何 DOM 监听。
+  - 远端→本地：只接受 `ClipboardFormat.Text`；默认登录不发送 `version`，
+    对端会走旧版 `Message.clipboard`，同时防御性解析
+    `Message.multi_clipboards` 的第一个 Text。`compress=true` 时用 zstddec
+    解压（动态 import，首次压缩剪贴板才加载 WASM）；只接受带 content-size
+    的 one-shot zstd 帧（RustDesk bulk compressor 的行为），校验声明长度并
+    严格 UTF-8 解码。默认 `navigator.clipboard.writeText` 自动复制；无用户
+    手势或权限被拒时回调 `{text, copied:false}`，P4-3 显示“复制”按钮并调用
+    `copyRemoteText()`（必须在点击手势中）。
+  - 本地→远端：`sendText(text)` 发送 `Clipboard{format:Text, content:utf8}`
+    （对端 `update_clipboard`，不是逐字输入）；发送抛错时按规格降级
+    `KeyEvent{seq, mode:Translate}`。`sendLocalClipboard()` 用
+    `navigator.clipboard.readText()` 读取本地剪贴板（需用户手势）。
+- 权限/门控：`enabled` 控制本地→远端（P4-1 应结合 `readOnly`、对端 clipboard
+  与 keyboard 权限）；`receiveEnabled` 控制远端→本地（P4-1 应结合本地
+  viewOnly/disable-clipboard）。上游对入站只看本地 viewOnly/disable，不看
+  对端权限；P3-6 接线时按此设置。
+- 去重/回环：单一 `lastSynced` 抑制对端回显和重复发送；空文本忽略（MVP
+  不清空剪贴板）。上限 4 MiB（`maxTextBytes`；上游桌面端允许 256 MiB）防止
+  浏览器内存被超大文本拖垮，超限报 `message-too-large`。
+- 边界：seq 降级只在发送抛错（传输层）时触发；对端因权限静默忽略
+  Clipboard 无法从协议观测，P4-1/P3-6 必须按权限选择消息类型。P3-3 的隐藏
+  textarea `paste` 仍直接发送 seq 并 `stopPropagation`；P4-1 不要让 P3-5 与
+  P3-3 重复处理同一 paste。
+- 验证：`tests/clipboard.test.ts`（18 项：文本过滤/MultiClipboards/zstd
+  1–8 字节长度头/声明长度不符/UTF-8/去重/双向发送/seq 降级/字节上限/
+  浏览器权限失败/门控/释放）、`tests/clipboard-integration.test.ts`（mock
+  hbbs/hbbr/peer 加密链路的双向文本）、`tests/e2e/clipboard.spec.ts`（真实
+  Chromium clipboard 权限：自动复制、压缩文本、点击读取本地剪贴板发送、
+  自动复制失败后的手动复制）。
+- ⏳ 真机待验：iOS Safari/Android Chrome 的 clipboard 权限、无手势自动写
+  失败后的手动复制、真实 RustDesk 对端双向同步需要真机。与 P3-1..P3-4
+  同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按规则未重复发通知；
+  P3-5 暂不勾选。
 
 ## 本机 Docker 真连环境（P1-9）
 

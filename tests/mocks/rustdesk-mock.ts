@@ -268,6 +268,12 @@ export class MockRustDeskServer {
     });
   }
 
+  /** Send one clipboard payload from the controlled peer (after login). */
+  sendClipboard(clipboard: DeepPartial<message.Clipboard>): void {
+    if (!this.peerSend) throw new Error('mock peer is not logged in yet');
+    this.peerSend({ clipboard: message.Clipboard.fromPartial(clipboard) });
+  }
+
   async close(): Promise<void> {
     for (const timer of this.pairingTimers.values()) clearTimeout(timer);
     for (const timer of this.idleTimers) clearTimeout(timer);

@@ -48,6 +48,11 @@ export type RustDeskErrorCode =
   | 'blocked'
   /** Remote revoked keyboard/clipboard permission. */
   | 'no-permission'
+  /**
+   * The browser clipboard API is unavailable, denied, or the call was not
+   * made from a user gesture (expected on iOS for automatic writes).
+   */
+  | 'clipboard-unavailable'
   /** Peer sent a non-VP9 frame; reconnect so it renegotiates VP9. */
   | 'unsupported-codec'
   /** Peer closed the session (`Misc.close_reason`). */

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>Clipboard check</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #111;
+        color: #eee;
+        font: 13px/1.5 monospace;
+      }
+      button {
+        margin-right: 8px;
+        padding: 6px 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Clipboard check (P3-5)</h1>
+    <p>
+      <button id="send-local" type="button">Send local clipboard</button>
+      <button id="copy-remote" type="button">Copy remote text</button>
+    </p>
+    <p id="status">loading…</p>
+    <script type="module" src="/src/clipboard-test.ts"></script>
+  </body>
+</html>
