@@ -10,7 +10,31 @@
 
 - 包脚手架已就绪：Vite library mode、tsconfig strict、Vitest、demo 骨架；
   公共入口为 `.`（`src/index.ts`）和 `./core`（`src/core.ts`）。
+- 公共类型/错误/组件骨架已导出（P0-4）；`RustDeskViewer` 目前只渲染布局
+  外壳，ref 方法在 P4-3 之前会抛出明确错误。
 - 硬约束：仅 VP9、库内不使用 Flutter/CanvasKit/gstatic/FFmpeg WASM；最终验收只读连接用户现有 hbbs/client。
+
+## 公共 API 骨架
+
+```tsx
+import { RustDeskViewer } from 'rustdesk-web-react';
+import type {
+  RustDeskViewerProps,
+  RustDeskViewerRef,
+  RustDeskErrorCode,
+  PeerInfo,
+  RustDeskStatusEvent,
+} from 'rustdesk-web-react';
+import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
+```
+
+- `rustdesk-web-react`：React 组件与 hook（后续任务），React 仅为 peerDependency。
+- `rustdesk-web-react/core`：不依赖 React 的会话/协议类型与错误类，可用于
+  Node/Worker 测试。
+- 配置字段见 `src/session/options.ts`；状态机取值见 `src/session/state.ts`；
+  错误码见 `src/session/errors.ts`。
+- `npm run build` 后 `dist/` 同时包含 ESM（`index.js`、`core.js`）和对应的
+  `.d.ts`；`core.js` 不 import React。
 
 ## 开发
 
