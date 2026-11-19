@@ -1,0 +1,17 @@
+rustdesk-web-react
+==================
+
+This project is licensed under the GNU Affero General Public License,
+version 3 or later. The full text is in LICENSE.
+
+Reused components
+-----------------
+
+- src/protocol/message.ts and src/protocol/rendezvous.ts are derived from the
+  RustDesk web client v1 (rustdesk/rustdesk-web, branch rustdesk-web-v1,
+  commit 8a9af6ecdd511fa97e89844e27c5d2dae53acd77), part of the RustDesk
+  project (https://github.com/rustdesk/rustdesk). AGPL-3.0-or-later; see
+  src/protocol/NOTICE.md for provenance and modifications.
+- assets/ogv/ contains ogv.js 1.8.6 decoder assets. See assets/ogv/COPYING,
+  assets/ogv/LICENSE-vpx.txt and assets/ogv/PATENTS-vpx.txt.
+- npm dependencies retain their own licenses; see each package's LICENSE.

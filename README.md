@@ -36,6 +36,19 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
 - `npm run build` 后 `dist/` 同时包含 ESM（`index.js`、`core.js`）和对应的
   `.d.ts`；`core.js` 不 import React。
 
+## 协议层（P1-1）
+
+- `src/protocol/message.ts`、`rendezvous.ts`：直接复用 rustdesk-web v1 的
+  ts-proto 生成代码（AGPL-3.0-or-later），并补上 MVP 所需的
+  `Clipboard.format`、`MultiClipboards`、`KeyEvent.mode`、`VideoFrame.display`、
+  `LoginRequest.version/my_platform`、`PublicKey.kx_version`。
+- `proto/message.proto`、`proto/rendezvous.proto`：RustDesk 1.5.3
+  (`d40e1da71`) 原样副本，仅作字段对照。
+- 新增字段默认值都是 protobuf 零值且编码时省略，因此 v1 消息字节保持不变；
+  `tests/protocol.test.ts` 用 `tests/fixtures/v1-protobuf.json`（由未修改的
+  v1 模块生成）校验字节一致性与未知字段跳过。
+- 来源、修改清单与 AGPL 声明：`NOTICE`、`src/protocol/NOTICE.md`、根 `LICENSE`。
+
 ## 开发
 
 ```bash

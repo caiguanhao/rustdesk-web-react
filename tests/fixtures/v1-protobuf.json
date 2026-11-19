@@ -1,0 +1,104 @@
+{
+  "source": {
+    "repo": "rustdesk-web (branch rustdesk-web-v1)",
+    "commit": "8a9af6ecdd511fa97e89844e27c5d2dae53acd77",
+    "files": [
+      {
+        "path": "js/src/message.ts",
+        "sha256": "05149b0ecbbe3c574fe1a90c3eef0224b79920cee735016069561ece0436e316"
+      },
+      {
+        "path": "js/src/rendezvous.ts",
+        "sha256": "5628eb12e1b5b30c1e489b08e64bbb7175ba43d1083728281ad1d07914fbbc00"
+      }
+    ],
+    "generator": "ts-proto 1.141.1"
+  },
+  "entries": [
+    {
+      "name": "clipboard-empty",
+      "type": "message.Clipboard",
+      "bytes": ""
+    },
+    {
+      "name": "clipboard-text",
+      "type": "message.Clipboard",
+      "bytes": "CAESAmhp"
+    },
+    {
+      "name": "hash",
+      "type": "message.Hash",
+      "bytes": "CghjMkZzZEE9PRIMWTJoaGJHeGxibWRs"
+    },
+    {
+      "name": "id-pk",
+      "type": "message.IdPk",
+      "bytes": "CgkxMjM0NTY3ODkSAwkIBw=="
+    },
+    {
+      "name": "signed-id",
+      "type": "message.SignedId",
+      "bytes": "CgMBAgM="
+    },
+    {
+      "name": "public-key",
+      "type": "message.PublicKey",
+      "bytes": "CgQBAgMEEgQFBgcI"
+    },
+    {
+      "name": "test-delay",
+      "type": "message.TestDelay",
+      "bytes": "CNKF2MwE"
+    },
+    {
+      "name": "login-request",
+      "type": "message.LoginRequest",
+      "bytes": "CgkxMjM0NTY3ODkSBAECAwQiA3dlYioDd2ViMgYIAxgBOAJIAQ=="
+    },
+    {
+      "name": "mouse-event",
+      "type": "message.MouseEvent",
+      "bytes": "CAkQyAEYkAMiAgQd"
+    },
+    {
+      "name": "key-event",
+      "type": "message.KeyEvent",
+      "bytes": "CAEYBEIBBA=="
+    },
+    {
+      "name": "message-misc-video-received",
+      "type": "message.Message",
+      "bytes": "mgECYAE="
+    },
+    {
+      "name": "message-misc-close-reason",
+      "type": "message.Message",
+      "bytes": "mgEISgZjbG9zZWQ="
+    },
+    {
+      "name": "message-video-frame",
+      "type": "message.Message",
+      "bytes": "MhQyDAoKCgMAAQIQARioRkjShdjMBA=="
+    },
+    {
+      "name": "message-login-response",
+      "type": "message.Message",
+      "bytes": "QjQSMgoFYWxpY2USB2Rlc2t0b3AaBUxpbnV4Ig4YgA8guAgqBERQLTEwAToFMS41LjNAKkoA"
+    },
+    {
+      "name": "punch-hole-request",
+      "type": "rendezvous.RendezvousMessage",
+      "bytes": "QhcKCTEyMzQ1Njc4ORACGgh0ZXN0LWtleQ=="
+    },
+    {
+      "name": "request-relay",
+      "type": "rendezvous.RendezvousMessage",
+      "bytes": "kgEoEgZ1dWlkLTEaBAkJCQkiDnJkLmV4YW1wbGUuY29tMgh0ZXN0LWtleQ=="
+    },
+    {
+      "name": "relay-response",
+      "type": "rendezvous.RendezvousMessage",
+      "bytes": "mgEwEgZ1dWlkLTEaDnJkLmV4YW1wbGUuY29tIgkxMjM0NTY3ODkqBAQFBgc6BTEuNS4z"
+    }
+  ]
+}
