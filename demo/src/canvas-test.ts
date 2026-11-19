@@ -2,11 +2,11 @@
 // Decodes the pre-generated VP9 fixtures, draws them through VideoRenderer and
 // returns pixel samples, letterbox geometry and FPS stats to the test.
 import { VP9_FIXTURES } from '../../test-fixtures/vp9';
-import { VideoRenderer } from '../../src/media/renderer';
-import { frameSize } from '../../src/media/vp9-decoder';
 import {
   bytesFromBase64,
   createCheckDecoder,
+  drawVp9Frame,
+  mountRenderer,
   readPixel,
   setStatus,
   snapshot,
@@ -49,21 +49,13 @@ async function runCanvasTest(): Promise<CanvasCheckResult> {
   stage.style.height = '360px';
   stage.replaceChildren();
 
-  const canvas = document.createElement('canvas');
-  stage.append(canvas);
-  const renderer = new VideoRenderer(canvas, stage, { webGL: true });
+  const { canvas, renderer } = mountRenderer(stage);
 
   let released = 0;
-  const drawFrame = async (value: Uint8Array) => {
-    const frame = await decoder.decode(value);
-    const size = frame ? frameSize(frame) : null;
-    if (!frame || !size) throw new Error('canvas test: frame did not decode');
-    renderer.draw(frame, () => {
+  const drawFrame = (value: Uint8Array) =>
+    drawVp9Frame(renderer, decoder, value, () => {
       released += 1;
-      decoder.recycle(frame);
     });
-    return size;
-  };
 
   setStatus('drawing fixtures…');
   const encoded = VP9_FIXTURES.map((entry) => ({

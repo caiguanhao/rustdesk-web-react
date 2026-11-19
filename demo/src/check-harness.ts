@@ -1,8 +1,12 @@
 // Shared helpers for the browser check pages (P2-1/P2-3/P2-5). These pages are
 // driven by scripts/check-decoders.mjs and tests/e2e/canvas.spec.ts.
 import { DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
-import type { RendererLayout, VideoRenderer } from '../../src/media/renderer';
-import { Vp9Decoder } from '../../src/media/vp9-decoder';
+import { VideoRenderer, type RendererLayout } from '../../src/media/renderer';
+import {
+  Vp9Decoder,
+  frameSize,
+  type FrameSize,
+} from '../../src/media/vp9-decoder';
 
 export const CHECK_TIMEOUT_MS = 20_000;
 
@@ -70,4 +74,32 @@ export function createCheckDecoder(simd?: boolean): Promise<Vp9Decoder> {
     assetBaseUrl: DEFAULT_ASSET_BASE_URL,
     timeoutMs: CHECK_TIMEOUT_MS,
   });
+}
+
+export function mountRenderer(container: HTMLElement): {
+  canvas: HTMLCanvasElement;
+  renderer: VideoRenderer;
+} {
+  const canvas = document.createElement('canvas');
+  container.append(canvas);
+  return { canvas, renderer: new VideoRenderer(canvas, container, { webGL: true }) };
+}
+
+export async function drawVp9Frame(
+  renderer: VideoRenderer,
+  decoder: Vp9Decoder,
+  bytes: Uint8Array,
+  onRelease?: () => void,
+): Promise<FrameSize> {
+  const frame = await decoder.decode(bytes);
+  const size = frame ? frameSize(frame) : null;
+  if (!frame || !size) throw new Error('VP9 frame did not decode');
+  renderer.draw(frame, () => {
+    try {
+      onRelease?.();
+    } finally {
+      decoder.recycle(frame);
+    }
+  });
+  return size;
 }

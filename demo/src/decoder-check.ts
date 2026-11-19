@@ -3,11 +3,12 @@
 // with both WASM builds and recycles every frame, then decodes it once more and
 // draws it through yuv-canvas to verify the letterboxed renderer geometry.
 import { VP9_FIXTURES } from '../../test-fixtures/vp9';
-import { VideoRenderer } from '../../src/media/renderer';
 import { frameSize } from '../../src/media/vp9-decoder';
 import {
   bytesFromBase64,
   createCheckDecoder,
+  drawVp9Frame,
+  mountRenderer,
   readPixel,
   setStatus,
   snapshot,
@@ -79,20 +80,13 @@ async function runRendererCheck(): Promise<unknown> {
   container.style.width = '320px';
   container.style.height = '200px';
   container.style.background = '#000';
-  const canvas = document.createElement('canvas');
-  container.append(canvas);
   document.body.append(container);
 
-  const renderer = new VideoRenderer(canvas, container, { webGL: true });
+  const { canvas, renderer } = mountRenderer(container);
   let released = 0;
   try {
-    const frame = await decoder.decode(FRAME);
-    const size = frame ? frameSize(frame) : null;
-    if (!frame || !size) throw new Error('renderer check: frame did not decode');
-
-    renderer.draw(frame, () => {
+    const size = await drawVp9Frame(renderer, decoder, FRAME, () => {
       released += 1;
-      decoder.recycle(frame);
     });
     const first = snapshot(canvas, container, renderer);
     const pixel = await readPixel(canvas);

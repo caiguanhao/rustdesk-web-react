@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>Mouse input check</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #eee;
+        font: 12px/1.4 monospace;
+      }
+      #stage {
+        width: 640px;
+        height: 360px;
+        background: #000;
+      }
+      #status {
+        margin: 8px;
+      }
+      .spacer {
+        height: 2000px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <p id="status">loading…</p>
+    <div class="spacer"></div>
+    <script type="module" src="/src/input-test.ts"></script>
+  </body>
+</html>

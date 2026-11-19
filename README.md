@@ -95,7 +95,7 @@ npm install
 npm run typecheck  # tsc strict 检查（不产出文件）
 npm run build      # Vite library mode + tsc 类型声明 → dist/
 npm run test         # Vitest
-npm run test:canvas  # Playwright 画布测试（需 Chrome 或 npx playwright install chromium）
+npm run test:canvas  # Playwright 画布/鼠标测试（需 Chrome 或 npx playwright install chromium）
 npm run test:decoder # headless Chrome 解码器/渲染检查（需本机 Chrome）
 npm run dev          # demo，http://localhost:5173
 ```
@@ -213,6 +213,40 @@ npm run dev          # demo，http://localhost:5173
 - Playwright 产物 `test-results/`、`playwright-report/` 已 gitignore。该测试
   需要浏览器，故不在 `npm test` 中；`npm run test:decoder` 仍用轻量 CDP
   脚本验证两套 WASM 与 P2-3 渲染细节。真机触摸/输入测试仍属 P3/P5。
+
+## 鼠标输入（P3-1，⏳ 真机待验）
+
+- `src/input/mouse.ts` 的 `MouseInput` 把 DOM 鼠标事件编码成 RustDesk
+  `MouseEvent`：低 3 位动作（move 0、down 1、up 2、wheel 3），按钮位左移 3
+  （left 1、right 2、middle 4、back 8、forward 16）。down/up 坐标固定 0，
+  发送前先发 move 确保光标落在点击位置；move 坐标来自
+  `VideoRenderer.toRemote()`（CSS→帧像素）加当前 display 原点
+  （`PeerInfo.displays[currentDisplay]`，由 P4-1 调 `setOrigin()` 更新），并
+  四舍五入/夹取到显示范围内。
+- 支持 move/down/up、左右中/后退/前进、Alt/Ctrl/Shift/Meta 修饰键、双击
+  （两次普通 down/up，无额外协议字段）、右键菜单拦截、middle/侧键的本地
+  auxclick 默认行为拦截、拖拽移出画布时贴边、`blur`/页面隐藏/禁用/卸载时
+  释放所有按下按钮。`wheel` 使用原生 `{passive:false}` 监听并
+  `preventDefault()`，避免页面滚动。
+- 滚轮方向（重要纠正）：DOM `deltaY>0` 表示向下，但 RustDesk 线协议方向相反。
+  官方 Flutter 客户端在发送前对每个轴取反，服务端又对非 Windows 的 y 取反，
+  Windows 再乘 120；直接发 DOM 原始值会导致方向错误且幅度放大 120 倍。
+  因此本实现发送主轴的 ±1 取反刻度（与官方 web v2 一致），而不是原始像素。
+  plan/spec 里“原始 delta、不要手动取反”的旧备注只适用于已由 Flutter
+  取反过的 web core bridge；真机方向仍待验收。
+- `enabled`/`setEnabled()` 是 P3-6/readOnly 的本地开关；禁用时释放按钮并停止
+  发送。P4-1 负责把 `PeerInfo` 的显示原点、会话 channel、切换期间的门控接上；
+  P4-3 负责 canvas attach/detach；P3-4 触摸必须与本模块互斥或过滤触摸合成
+  的鼠标事件。
+- 验证：`tests/input-mouse.test.ts`（20 项 jsdom：mask/坐标/修饰键/滚轮/
+  双击/拖拽/默认行为/启用禁用/清理/错误）、
+  `tests/input-mouse-integration.test.ts`（Node 假 DOM + 真实 mock
+  hbbs/hbbr/peer 加密链路）、`tests/e2e/input.spec.ts`（真实浏览器：
+  letterbox/竖屏坐标、右键 contextmenu、滚轮且页面不滚动、拖出画布贴边、
+  mask 序列）。`npm run test:canvas` 同时跑画布和鼠标测试。
+- ⏳ 真机待验：尚无 P4-1/P4-3 的会话/Viewer 输入接线，也没有获授权的真实
+  RustDesk 被控端，因此真实点击/拖动/滚轮方向未验证；已通过 通知并记录
+  在 plan。P3-1 暂不勾选。
 
 ## 本机 Docker 真连环境（P1-9）
 
