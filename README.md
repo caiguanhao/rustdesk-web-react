@@ -207,7 +207,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 8 个 Playwright 测试：
+  Chromium/Chrome，当前跑 9 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -228,7 +228,10 @@ npm run dev          # demo，http://localhost:5173
   8. `demo/viewer-test.html` 在宿主 React 页面（StrictMode）中嵌入
      `<RustDeskViewer autoConnect={false} readOnly>`，验证 640×360 宿主
      尺寸、canvas/工具栏/自定义 labels、只读按钮门控、一个 IME textarea
-     （StrictMode 首个挂载已清理）且宿主页面仍可交互（P4-3）。
+     （StrictMode 首个挂载已清理）且宿主页面仍可交互（P4-3）；
+  9. `demo/index.html` 填写 P4-4 表单并对裸 WS server 发起真实 rendezvous
+     连接，验证只保留一个 live socket、非密码字段写入 localStorage、密码
+     不出现在 storage/console，重载后非密码字段恢复（P4-4）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -619,10 +622,28 @@ npm run dev          # demo，http://localhost:5173
   重连、卸载清理、ref）、`tests/rustdesk-viewer-ssr.test.tsx`（1 项）、
   `tests/e2e/viewer.spec.ts`（真实 Chromium 宿主页面 + StrictMode）。
   `tests/mocks/fake-yuv-canvas.ts` 供 jsdom 共用。`npm test` 406 passed/
-  1 skipped；Playwright 8 passed；typecheck/build 通过。
+  1 skipped；P4-3 完成时 8 个 Playwright 测试通过；typecheck/build 通过。
 - 无需真机：P4-3 验收是“可嵌入任意 React 页面”，已由 jsdom、SSR 与真实
   Chromium 覆盖；真实 iOS/Android 的触摸/软键盘/剪贴板仍按 P3/P5 记录为
   ⏳ 真机待验，未声称真机通过。
+
+## Demo 表单（P4-4，已完成）
+
+- `demo/src/App.tsx`：Server/Server Key/Relay(可选)/Device ID/Password/
+  Asset Base URL 表单。提交后以表单快照挂载 `<RustDeskViewer autoConnect/>`
+  （viewer/protocol/renderer 代码懒加载，不进入表单首屏）；“Change
+  settings”卸载 viewer（dispose session/socket）并回到表单。
+- 持久化/密码：提交时只把非密码字段写入 localStorage，密码仅存在于 React
+  state/session config，提交后清空，不写 storage/URL/console；
+  `VITE_RD_*` 是首次默认值，模板见 `demo/.env.example`，用户复制为
+  gitignored 的 `demo/.env.local`。HTTP/HTTPS/WSS、LAN、端口偏移、混合
+  内容、安全上下文/剪贴板、资源同源与排错见 `demo/README.md`。
+- 验证：`tests/e2e/demo.spec.ts`（真实 Chromium；填表→viewer→裸 WS server
+  一个 live client；只保存非密码字段；console 无密码；关闭后 socket 归零
+  且密码框清空；重载恢复非密码字段）。`npm test` 406 passed/1 skipped；
+  Playwright 9 passed；typecheck/build 通过。
+- 无需真机：P4-4 验收是表单接线/持久化/密码卫生；完整 RustDesk 握手继续由
+  P1-8 mock、P1-9 隔离 Docker 真连与 P5-5 真实环境覆盖。
 
 ## 本机 Docker 真连环境（P1-9）
 
@@ -656,4 +677,5 @@ npm run dev           # 打开 demo，填写 Server/Server Key/Device ID/Passwor
 - `~/work/source/rustdesk` — 上游 RustDesk（只读）
 - `~/work/source/rustdesk-web` — web v1/v2 构建产物（只读）
 
-`demo/.env.local` 仅存在于本机，可能含密码，绝不提交。
+`demo/.env.local` 仅存在于本机，可能含密码，绝不提交；模板见
+`demo/.env.example`，用法/HTTPS/LAN 说明见 `demo/README.md`。

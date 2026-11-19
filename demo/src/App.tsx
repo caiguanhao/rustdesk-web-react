@@ -1,392 +1,274 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  DEFAULT_ASSET_BASE_URL,
-  OGV_RUNTIME_FILES,
-  RustDeskError,
-  VERSION,
-  assetUrl,
-  resolveAssetBaseUrl,
-  type PeerInfo,
+/**
+ * P4-4 demo: the embeddable viewer behind a small connection form.
+ *
+ * Non-password fields are remembered in localStorage; the password is kept in
+ * React state only and never written to storage or logs. `VITE_RD_PASSWORD`
+ * may prefill it for local development (gitignored `.env.local`), but the
+ * demo still never persists it. Submitting mounts a fresh <RustDeskViewer>
+ * (lazy-loaded, so the form does not pay for the protocol/renderer graph) with
+ * a snapshot of the form; "Change settings" unmounts/disposes it.
+ */
+import { lazy, Suspense, useState, type FormEvent } from 'react';
+import type {
+  PeerInfo,
+  RustDeskSessionConfig,
+  RustDeskStatusEvent,
 } from 'rustdesk-web-react/core';
-import type { RelayConnection } from '../../src/protocol/connection';
-import type { LoginFlow } from '../../src/protocol/login';
-
-interface ManifestFile {
-  name: string;
-  role: string;
-  bytes: number;
-}
-
-interface DecoderManifest {
-  version: string;
-  files: ManifestFile[];
-}
-
-interface AssetCheckResult {
-  base: string;
-  version: string;
-  files: { name: string; bytes: number }[];
-}
-
-type AssetCheckState =
-  | { status: 'checking' }
-  | { status: 'ok'; result: AssetCheckResult }
-  | { status: 'error'; message: string };
-
-interface PasswordPrompt {
-  retry: boolean;
-  detail?: string;
-}
-
-interface ConnectError {
-  code: string;
-  message: string;
-}
 
 const env = import.meta.env;
+const STORAGE_KEY = 'rustdesk-web-react.demo.form.v1';
+/** Mirrors `DEFAULT_ASSET_BASE_URL`; the viewer applies it when empty. */
+const DEFAULT_ASSET_BASE = '/rustdesk-assets/';
 
-async function fetchOk(url: string, signal: AbortSignal): Promise<Response> {
-  const response = await fetch(url, { cache: 'no-store', signal });
-  if (!response.ok) {
-    throw new Error(`${url}: HTTP ${response.status}`);
+const FIELD_KEYS = [
+  'server',
+  'serverKey',
+  'relayServer',
+  'id',
+  'assetBaseUrl',
+] as const;
+type FormField = (typeof FIELD_KEYS)[number];
+type FormValues = Record<FormField, string>;
+
+const RustDeskViewer = lazy(() =>
+  import('rustdesk-web-react').then((module) => ({
+    default: module.RustDeskViewer,
+  })),
+);
+
+function environmentDefaults(): FormValues {
+  return {
+    server: env.VITE_RD_SERVER ?? '',
+    serverKey: env.VITE_RD_KEY ?? '',
+    relayServer: env.VITE_RD_RELAY ?? '',
+    id: env.VITE_RD_ID ?? '',
+    assetBaseUrl: env.VITE_RD_ASSET_BASE ?? '',
+  };
+}
+
+/** Env values are first-run defaults; later form submissions win. */
+function loadForm(): FormValues {
+  const values = environmentDefaults();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return values;
+    const saved: unknown = JSON.parse(raw);
+    if (!saved || typeof saved !== 'object') return values;
+    for (const field of FIELD_KEYS) {
+      const value = (saved as Record<string, unknown>)[field];
+      if (typeof value === 'string') values[field] = value;
+    }
+  } catch {
+    // Private mode or a corrupt/old value: fall back to env defaults.
   }
-  return response;
+  return values;
 }
 
-/** Load the real ogv loader and point it at `base`. */
-async function loadOgvLoader(base: string, signal: AbortSignal): Promise<void> {
-  const { loadOgvJs } = await import('../../src/media/vp9-decoder');
-  await loadOgvJs(base, 15_000, signal);
+/** FIELD_KEYS is the allow-list; the password is not part of FormValues. */
+function saveForm(values: FormValues): void {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        Object.fromEntries(FIELD_KEYS.map((field) => [field, values[field]])),
+      ),
+    );
+  } catch {
+    // Persistence is a convenience; never block connecting.
+  }
 }
 
-async function checkAssets(assetBaseUrl: string, signal: AbortSignal): Promise<AssetCheckResult> {
-  const base = resolveAssetBaseUrl(assetBaseUrl);
-  const manifestResponse = await fetchOk(assetUrl(base, 'manifest.json'), signal);
-  const manifest = (await manifestResponse.json()) as DecoderManifest;
-  const byName = new Map(manifest.files.map((file) => [file.name, file]));
+function normalized(values: FormValues): FormValues {
+  return Object.fromEntries(
+    FIELD_KEYS.map((field) => [field, values[field].trim()]),
+  ) as FormValues;
+}
 
-  const files = await Promise.all(
-    OGV_RUNTIME_FILES.map(async (name) => {
-      const entry = byName.get(name);
-      if (!entry) throw new Error(`${name}: missing from manifest.json`);
-      const response = await fetchOk(new URL(name, base).href, signal);
-      const bytes = (await response.arrayBuffer()).byteLength;
-      if (bytes !== entry.bytes) {
-        throw new Error(`${name}: ${bytes} bytes, expected ${entry.bytes}`);
-      }
-      return { name, bytes };
-    }),
+function optional(value: string): string | undefined {
+  return value === '' ? undefined : value;
+}
+
+interface DemoFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: 'text' | 'password';
+  placeholder?: string;
+  autoComplete?: string;
+}
+
+function DemoField({
+  id,
+  label,
+  value,
+  onChange,
+  type = 'text',
+  placeholder,
+  autoComplete,
+}: DemoFieldProps) {
+  return (
+    <label className="demo-field" htmlFor={id}>
+      <span>{label}</span>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+      />
+    </label>
   );
-
-  await loadOgvLoader(base, signal);
-  return { base, version: manifest.version, files };
 }
 
 export function App() {
-  const [assetBaseUrl, setAssetBaseUrl] = useState(
-    env.VITE_RD_ASSET_BASE || DEFAULT_ASSET_BASE_URL,
+  const [form, setForm] = useState<FormValues>(loadForm);
+  const [password, setPassword] = useState(
+    () => env.VITE_RD_PASSWORD ?? '',
   );
-  const [assetState, setAssetState] = useState<AssetCheckState>({ status: 'checking' });
-  const assetAbortRef = useRef<AbortController | null>(null);
-
-  const [server, setServer] = useState(env.VITE_RD_SERVER ?? '');
-  const [serverKey, setServerKey] = useState(env.VITE_RD_KEY ?? '');
-  const [relayServer, setRelayServer] = useState(env.VITE_RD_RELAY ?? '');
-  const [deviceId, setDeviceId] = useState(env.VITE_RD_ID ?? '');
-  const [password, setPassword] = useState(env.VITE_RD_PASSWORD ?? '');
-  const [status, setStatus] = useState('idle');
-  const [busy, setBusy] = useState(false);
+  const [active, setActive] = useState<RustDeskSessionConfig | null>(null);
+  const [status, setStatus] = useState<RustDeskStatusEvent>({
+    status: 'idle',
+  });
   const [peerInfo, setPeerInfo] = useState<PeerInfo | null>(null);
-  const [passwordPrompt, setPasswordPrompt] = useState<PasswordPrompt | null>(null);
-  const [permissions, setPermissions] = useState<string[]>([]);
-  const [error, setError] = useState<ConnectError | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const connectionRef = useRef<RelayConnection | null>(null);
-  const flowRef = useRef<LoginFlow | null>(null);
-  const connectAbortRef = useRef<AbortController | null>(null);
+  const update = (field: keyof FormValues, value: string): void => {
+    setForm((current) => ({ ...current, [field]: value }));
+  };
 
-  const cleanupConnection = useCallback(() => {
-    connectAbortRef.current?.abort();
-    connectAbortRef.current = null;
-    flowRef.current?.dispose();
-    flowRef.current = null;
-    connectionRef.current?.close();
-    connectionRef.current = null;
-  }, []);
-
-  useEffect(() => cleanupConnection, [cleanupConnection]);
-
-  const runAssetCheck = useCallback((base: string) => {
-    assetAbortRef.current?.abort();
-    const controller = new AbortController();
-    assetAbortRef.current = controller;
-    setAssetState({ status: 'checking' });
-    checkAssets(base, controller.signal).then(
-      (result) => {
-        if (!controller.signal.aborted) setAssetState({ status: 'ok', result });
-      },
-      (failure: unknown) => {
-        if (controller.signal.aborted) return;
-        setAssetState({
-          status: 'error',
-          message: failure instanceof Error ? failure.message : String(failure),
-        });
-      },
-    );
-  }, []);
-
-  useEffect(() => {
-    runAssetCheck(DEFAULT_ASSET_BASE_URL);
-    return () => assetAbortRef.current?.abort();
-  }, [runAssetCheck]);
-
-  const connect = async (): Promise<void> => {
-    cleanupConnection();
-    setError(null);
-    setPeerInfo(null);
-    setPasswordPrompt(null);
-    setPermissions([]);
-    setStatus('connecting');
-    setBusy(true);
-
-    if (!server.trim() || !deviceId.trim()) {
-      setError({ code: 'invalid-config', message: 'Server and Device ID are required.' });
-      setStatus('error');
-      setBusy(false);
+  const connect = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const values = normalized(form);
+    if (!values.server || !values.id) {
+      setFormError('Server and Device ID are required.');
       return;
     }
-
-    const controller = new AbortController();
-    connectAbortRef.current = controller;
-    try {
-      // Keep protobuf/libsodium out of the initial demo bundle.
-      const [{ connectRelay }, { LoginFlow }] = await Promise.all([
-        import('../../src/protocol/connection'),
-        import('../../src/protocol/login'),
-      ]);
-      const connection = await connectRelay({
-        server: server.trim(),
-        peerId: deviceId.trim(),
-        serverKey: serverKey.trim() || undefined,
-        relayServer: relayServer.trim() || undefined,
-        secure: window.location.protocol === 'https:',
-        signal: controller.signal,
-        openTimeoutMs: 12_000,
-        responseTimeoutMs: 12_000,
-        securingTimeoutMs: 18_000,
-      });
-      connectionRef.current = connection;
-
-      const flow = new LoginFlow(connection, {
-        peerId: deviceId.trim(),
-        password: password || undefined,
-        loginTimeoutMs: 60_000,
-        onStatus: (event) => {
-          setStatus(event.status);
-          if (event.status === 'password-required') {
-            setPasswordPrompt({ retry: event.retry, detail: event.detail });
-          }
-        },
-        onPermission: (change) => {
-          setPermissions((current) => [
-            ...current,
-            `${change.permission}: ${change.enabled ? 'on' : 'off'}`,
-          ]);
-        },
-      });
-      flowRef.current = flow;
-      const info = await flow.start(undefined, controller.signal);
-      setPeerInfo(info);
-      setPasswordPrompt(null);
-      setStatus('connected');
-    } catch (failure) {
-      if (controller.signal.aborted) return;
-      if (failure instanceof RustDeskError) {
-        setError({ code: failure.code, message: failure.message });
-      } else {
-        setError({
-          code: 'unknown',
-          message: failure instanceof Error ? failure.message : String(failure),
-        });
-      }
-      setStatus('error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const retryLogin = (): void => {
-    setPasswordPrompt(null);
-    try {
-      flowRef.current?.login(password);
-    } catch (failure) {
-      setError({
-        code: failure instanceof RustDeskError ? failure.code : 'unknown',
-        message: failure instanceof Error ? failure.message : String(failure),
-      });
-    }
-  };
-
-  const disconnect = (): void => {
-    cleanupConnection();
+    saveForm(values);
+    setForm(values);
+    setFormError(null);
+    setStatus({ status: 'connecting' });
     setPeerInfo(null);
-    setPasswordPrompt(null);
-    setPermissions([]);
-    setStatus('idle');
-    setError(null);
+    setActive({
+      server: values.server,
+      serverKey: optional(values.serverKey),
+      relayServer: optional(values.relayServer),
+      id: values.id,
+      password: password === '' ? undefined : password,
+      assetBaseUrl: optional(values.assetBaseUrl),
+    });
+    // The viewer's config snapshot keeps the password; the form does not.
+    setPassword('');
+  };
+
+  const closeViewer = (): void => {
+    setActive(null);
   };
 
   return (
-    <main
-      style={{
-        fontFamily: 'system-ui, sans-serif',
-        padding: '2rem',
-        maxWidth: '48rem',
-        margin: '0 auto',
-      }}
-    >
-      <h1>rustdesk-web-react</h1>
-      <p>Demo v{VERSION}. Video/input wiring arrives in later tasks.</p>
+    <main className="demo">
+      <header className="demo-header">
+        <h1>rustdesk-web-react</h1>
+        <p>Embed a RustDesk session in your own React admin.</p>
+      </header>
 
-      <section style={{ marginBottom: '2rem' }}>
-        <h2>Connect</h2>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void connect();
-          }}
-          style={{ display: 'grid', gap: '0.5rem' }}
-        >
-          <label>
-            Server (host:port)
-            <input
-              value={server}
-              onChange={(event) => setServer(event.target.value)}
-              placeholder="127.0.0.1:12116"
-              style={{ width: '100%', fontFamily: 'monospace' }}
+      {active ? (
+        <section className="viewer-panel">
+          <div className="viewer-head">
+            <span data-demo-status={status.status}>
+              status: <strong>{status.status}</strong>
+            </span>
+            {peerInfo ? (
+              <span className="viewer-peer">
+                {peerInfo.username || 'unknown'}@{peerInfo.hostname} ·{' '}
+                {peerInfo.platform} · RustDesk {peerInfo.version}
+              </span>
+            ) : null}
+            <button
+              id="rd-close"
+              type="button"
+              className="demo-button secondary"
+              onClick={closeViewer}
+            >
+              Change settings
+            </button>
+          </div>
+          <Suspense
+            fallback={<p className="demo-note">Loading viewer…</p>}
+          >
+            <RustDeskViewer
+              {...active}
+              autoConnect
+              onStatusChange={setStatus}
+              onPeerInfo={setPeerInfo}
             />
-          </label>
-          <label>
-            Server Key (hbbs public key, base64)
-            <input
-              value={serverKey}
-              onChange={(event) => setServerKey(event.target.value)}
-              style={{ width: '100%', fontFamily: 'monospace' }}
-            />
-          </label>
-          <label>
-            Relay Server (optional)
-            <input
-              value={relayServer}
-              onChange={(event) => setRelayServer(event.target.value)}
-              placeholder="uses RelayResponse / hbbs +3"
-              style={{ width: '100%', fontFamily: 'monospace' }}
-            />
-          </label>
-          <label>
-            Device ID
-            <input
-              value={deviceId}
-              onChange={(event) => setDeviceId(event.target.value)}
-              style={{ width: '100%', fontFamily: 'monospace' }}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="off"
-              style={{ width: '100%', fontFamily: 'monospace' }}
-            />
-          </label>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button type="submit" disabled={busy}>
+          </Suspense>
+        </section>
+      ) : (
+        <form className="demo-form" onSubmit={connect}>
+          <DemoField
+            id="rd-server"
+            label="Server (host:port)"
+            value={form.server}
+            onChange={(value) => update('server', value)}
+            placeholder="127.0.0.1:12116"
+          />
+          <DemoField
+            id="rd-server-key"
+            label="Server Key (hbbs public key, base64; self-hosted)"
+            value={form.serverKey}
+            onChange={(value) => update('serverKey', value)}
+          />
+          <DemoField
+            id="rd-relay"
+            label="Relay Server (optional)"
+            value={form.relayServer}
+            onChange={(value) => update('relayServer', value)}
+            placeholder="empty uses RelayResponse / hbbs +3"
+          />
+          <DemoField
+            id="rd-id"
+            label="Device ID"
+            value={form.id}
+            onChange={(value) => update('id', value)}
+          />
+          <DemoField
+            id="rd-password"
+            label="Password (leave empty to use the viewer prompt; not saved)"
+            value={password}
+            onChange={setPassword}
+            type="password"
+            autoComplete="off"
+          />
+          <DemoField
+            id="rd-asset-base"
+            label="Asset Base URL (same-origin; empty uses the default)"
+            value={form.assetBaseUrl}
+            onChange={(value) => update('assetBaseUrl', value)}
+            placeholder={DEFAULT_ASSET_BASE}
+          />
+
+          {formError ? (
+            <p className="demo-error" role="alert">
+              {formError}
+            </p>
+          ) : null}
+
+          <div className="demo-actions">
+            <button id="rd-connect" type="submit" className="demo-button">
               Connect
             </button>
-            <button type="button" onClick={disconnect}>
-              Disconnect
-            </button>
-            <span>
-              status: <strong>{status}</strong>
+            <span className="demo-note">
+              Non-password fields are remembered in this browser. The password
+              is never stored.
             </span>
           </div>
         </form>
-
-        {passwordPrompt && (
-          <div style={{ marginTop: '0.75rem', color: '#8a5a00' }}>
-            Password required{passwordPrompt.retry ? ' (previous password was rejected)' : ''}
-            {passwordPrompt.detail ? `: ${passwordPrompt.detail}` : ''}
-            <div style={{ marginTop: '0.25rem' }}>
-              <button type="button" onClick={retryLogin}>
-                Retry login
-              </button>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <p style={{ color: '#b00020' }}>
-            {error.code}: {error.message}
-          </p>
-        )}
-
-        {permissions.length > 0 && (
-          <p>permissions: {permissions.join(', ')}</p>
-        )}
-
-        {peerInfo && (
-          <div style={{ marginTop: '0.75rem', color: '#0b7a29' }}>
-            <p>
-              Connected to {peerInfo.username || '(unknown user)'}@{peerInfo.hostname} (
-              {peerInfo.platform}, RustDesk {peerInfo.version})
-            </p>
-            <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
-              {peerInfo.displays.map((display, index) => (
-                <li key={index}>
-                  display {index}: {display.width}×{display.height} {display.name}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <h2>Decoder assets</h2>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            runAssetCheck(assetBaseUrl);
-          }}
-          style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-        >
-          <label htmlFor="asset-base">Asset Base URL</label>
-          <input
-            id="asset-base"
-            value={assetBaseUrl}
-            onChange={(event) => setAssetBaseUrl(event.target.value)}
-            style={{ flex: 1, fontFamily: 'monospace' }}
-          />
-          <button type="submit">Check</button>
-        </form>
-
-        <div style={{ marginTop: '0.75rem' }}>
-          {assetState.status === 'checking' && <p>Loading decoder assets…</p>}
-          {assetState.status === 'error' && (
-            <p style={{ color: '#b00020' }}>Asset check failed: {assetState.message}</p>
-          )}
-          {assetState.status === 'ok' && (
-            <div>
-              <p style={{ color: '#0b7a29' }}>
-                ✓ ogv.js {assetState.result.version}: all {assetState.result.files.length} files
-                served from <code>{assetState.result.base}</code>; loader ready
-              </p>
-            </div>
-          )}
-        </div>
-      </section>
+      )}
     </main>
   );
 }
