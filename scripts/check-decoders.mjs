@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// P2-1 browser acceptance: start the demo Vite server, drive headless Chrome
-// over CDP, and initialize/decode with both VP9 WASM builds.
+// P2-1/P2-3 browser acceptance: start the demo Vite server, drive headless
+// Chrome over CDP, initialize/decode with both VP9 WASM builds, then draw a
+// decoded frame through the yuv-canvas renderer and check its letterbox box.
 //
 //   npm run test:decoder
 //
@@ -151,7 +152,8 @@ async function run() {
       '--disable-background-networking',
       '--enable-precise-memory-info',
       '--js-flags=--expose-gc',
-      '--disable-gpu',
+      // yuv-canvas needs a real WebGL context for the renderer check.
+      '--enable-unsafe-swiftshader',
       PAGE_URL,
     ],
     { stdio: 'ignore' },
@@ -193,12 +195,70 @@ async function run() {
     results.push(result);
   }
 
+  console.log('checking yuv-canvas renderer…');
+  const renderer = await cdp.evaluate('runRendererCheck()');
+  checkRenderer(renderer);
+  results.push({ renderer });
+
   if (cdp.errors.length > 0) {
     throw new Error(`browser errors: ${JSON.stringify(cdp.errors, null, 2)}`);
   }
 
   console.log(JSON.stringify(results, null, 2));
-  console.log('decoder check OK');
+  console.log('decoder and renderer checks OK');
+}
+
+function checkRenderer(result) {
+  const fail = (message) => {
+    throw new Error(`renderer check failed: ${message}: ${JSON.stringify(result)}`);
+  };
+  const near = (actual, expected, tolerance = 0.5) =>
+    typeof actual === 'number' && Math.abs(actual - expected) <= tolerance;
+  if (!result) fail('no result');
+  if (result.usingWebGL !== true) fail('yuv-canvas did not use WebGL');
+  if (result.released !== 1) fail(`frame released ${result.released} times`);
+  if (result.frame.width !== 64 || result.frame.height !== 64) {
+    fail(`unexpected frame size ${result.frame.width}×${result.frame.height}`);
+  }
+  if (
+    !result.centerRemote ||
+    !near(result.centerRemote.x, 32, 0.01) ||
+    !near(result.centerRemote.y, 32, 0.01)
+  ) {
+    fail(`center maps to ${JSON.stringify(result.centerRemote)}, expected (32,32)`);
+  }
+  if (!result.pixel) fail('could not read back the rendered canvas');
+  const [red, green, blue] = result.pixel;
+  if (!(red > 200 && green < 80 && blue < 80)) {
+    fail(`rendered pixel was ${JSON.stringify(result.pixel)}, expected red`);
+  }
+
+  const steps = [
+    { name: 'first', value: result.first, offsetX: 60, offsetY: 0 },
+    { name: 'second', value: result.second, offsetX: 0, offsetY: 60 },
+  ];
+  for (const { name, value, offsetX, offsetY } of steps) {
+    if (!value.layout) fail(`${name} layout is null`);
+    if (value.canvasWidth !== 64 || value.canvasHeight !== 64) {
+      fail(`${name} canvas is ${value.canvasWidth}×${value.canvasHeight}`);
+    }
+    if (value.layout.cssWidth !== 200 || value.layout.cssHeight !== 200) {
+      fail(
+        `${name} CSS box is ${value.layout.cssWidth}×${value.layout.cssHeight}`,
+      );
+    }
+    if (value.layout.offsetX !== offsetX || value.layout.offsetY !== offsetY) {
+      fail(
+        `${name} layout offset is ${value.layout.offsetX},${value.layout.offsetY}`,
+      );
+    }
+    if (!near(value.rectWidth, 200) || !near(value.rectHeight, 200)) {
+      fail(`${name} canvas rect is ${value.rectWidth}×${value.rectHeight}`);
+    }
+    if (!near(value.offsetX, offsetX) || !near(value.offsetY, offsetY)) {
+      fail(`${name} measured offset is ${value.offsetX},${value.offsetY}`);
+    }
+  }
 }
 
 const timeout = setTimeout(() => {

@@ -31,12 +31,38 @@ export interface Vp9DecoderOptions {
   timeoutMs?: number;
 }
 
-/** Opaque YUV frame returned by ogv; the renderer owns the plane layout. */
+/** ogv's YUV frame format (subset used for sizing). */
+export interface Vp9FrameFormat {
+  width?: number;
+  height?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+}
+
+/**
+ * Opaque YUV frame returned by ogv; the renderer owns the plane layout.
+ * Real ogv frames carry their size in `format.displayWidth/displayHeight`
+ * (plus `y`/`u`/`v` planes); the optional top-level size is for synthetic
+ * frames in tests.
+ */
 export interface Vp9Frame {
+  width?: number;
+  height?: number;
+  format?: Vp9FrameFormat;
+  [key: string]: unknown;
+}
+
+export interface FrameSize {
   width: number;
   height: number;
-  yuv?: unknown;
-  [key: string]: unknown;
+}
+
+/** Display size of an ogv frame, preferring `format` over synthetic fields. */
+export function frameSize(frame: Vp9Frame): FrameSize | null {
+  const width = frame.format?.displayWidth ?? frame.format?.width ?? frame.width;
+  const height =
+    frame.format?.displayHeight ?? frame.format?.height ?? frame.height;
+  return width && height ? { width, height } : null;
 }
 
 interface OgvDecoder {

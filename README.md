@@ -124,7 +124,8 @@ npm run dev        # demo，http://localhost:5173
   （ogv 1.8.6 的 `close()` 是 no-op），`dispose()` 丢弃实例。
 - 浏览器验收：`npm run test:decoder`（需要本机 Chrome）在 headless Chrome
   中用两套真实 WASM 各解码 200 个 VP9 keyframe；测试页面为
-  `demo/decoder-check.html`。
+  `demo/decoder-check.html`。同一脚本还会用真实解码帧跑一遍渲染器
+  （见下文 P2-3）。
 - `src/media/video-pipeline.ts`：有界帧队列（默认 8）+ 单路串行解码；每批
   `VideoFrame` 都回 `Misc{video_received}`（含丢弃批次），丢帧/解码失败后进入
   `awaitingKeyframe` 并限频发送 `Misc{refresh_video}`，直到 keyframe 恢复；
@@ -132,6 +133,34 @@ npm run dev        # demo，http://localhost:5173
   `draw(frame, release)` 绘制后调用 `release()`（幂等，pipeline 兜底回收）；
   非 VP9 帧报 `unsupportedCodec` 并建议重连。mock peer 集成测试验证 ack/
   refresh，见 `tests/mock-server.test.ts`。
+
+## 渲染（P2-3）
+
+- `src/media/renderer.ts` 的 `VideoRenderer` 实现 P2-2 的 `VideoSink`：
+  `draw(frame, release)` 用 yuv-canvas 绘制，并在 `finally` 中调用
+  `release()`。WebGL 优先，`WebGLFrameSink.isAvailable()` 为 false 或
+  attach 失败时回退到 yuv-canvas 的软件 sink，`usingWebGL` 反映实际路径。
+- yuv-canvas 拥有 `canvas.width/height`，会把它设为帧显示尺寸，因此 canvas
+  保持帧分辨率，屏幕缩放完全交给 CSS：画布绝对定位，按
+  `min(容器宽/帧宽, 容器高/帧高)` 计算宽高和居中偏移，实现不变形的
+  letterbox。DPR/离屏 canvas 清晰度优化留待后续（规格允许）。
+- `layout`/`onLayout` 只在容器或帧尺寸真正变化时更新；`draw()` 仅在帧尺寸
+  变化时重排，容器变化由 `ResizeObserver`/`window.resize`/全屏事件驱动。
+  容器为 0 或首帧前 `layout` 为 `null`。`vp9-decoder.ts` 导出的
+  `frameSize()` 统一了 `format.displayWidth/displayHeight` 优先级。
+- 坐标变换：`toRemote(clientX, clientY)` 把视口坐标映射为远端帧像素
+  （画布外返回 `null`，右/下边界为开区间），`toClient(x, y)` 为逆变换；
+  P3-1/P3-4 输入层负责取整/夹取。
+- `ResizeObserver` + `window.resize` 回退；`fullscreenchange` /
+  `webkitfullscreenchange` 触发重排。`requestFullscreen()` 以容器为目标，
+  不支持或被拒绝时返回 `false`；`exitFullscreen()` 只退出本渲染器的容器。
+  兼容 Safari/iPadOS 15 的 `webkit*` API；iPhone Safari 没有元素全屏，
+  P4-3 应隐藏/禁用按钮。
+- 单测 `tests/renderer.test.ts`（23 项）覆盖 WebGL 选择/回退/失败、
+  16:9/4:3/1:1/竖屏/裁剪显示尺寸、resize、0 尺寸、坐标边界、抛错仍释放、
+  dispose 和全屏（标准/前缀/不支持/拒绝）。`npm run test:decoder` 额外
+  用真实 VP9 帧验证 WebGL 像素回读 `(255,0,0,255)` 及两种容器比例下的
+  CSS letterbox 几何；真机全屏/旋转列入 P5-1/P5-2。
 
 ## 本机 Docker 真连环境（P1-9）
 
