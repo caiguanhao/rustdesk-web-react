@@ -12,3 +12,8 @@ export type {
   RustDeskViewerProps,
   RustDeskViewerRef,
 } from './react/RustDeskViewer.js';
+export { useRustDeskSession } from './react/useRustDeskSession.js';
+export type {
+  UseRustDeskSessionOptions,
+  UseRustDeskSessionResult,
+} from './react/useRustDeskSession.js';

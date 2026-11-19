@@ -303,8 +303,8 @@ export class RustDeskSession {
         imageQuality: this.config.imageQuality,
         advertiseWebClientVersion: this.config.advertiseWebClientVersion,
         disableClipboard:
-          this.config.readOnly === true ||
-          this.config.disableClipboard === true,
+          this.permissionState.readOnly ||
+          this.permissionState.disableClipboard,
         approvalAfterMs: this.deps.approvalAfterMs,
         heartbeatIntervalMs: this.deps.heartbeatIntervalMs,
         onStatus: (event) => {

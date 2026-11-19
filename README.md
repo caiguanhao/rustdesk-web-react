@@ -17,7 +17,7 @@
 ## 公共 API 骨架
 
 ```tsx
-import { RustDeskViewer } from 'rustdesk-web-react';
+import { RustDeskViewer, useRustDeskSession } from 'rustdesk-web-react';
 import type {
   RustDeskViewerProps,
   RustDeskViewerRef,
@@ -32,7 +32,8 @@ import {
 } from 'rustdesk-web-react/core';
 ```
 
-- `rustdesk-web-react`：React 组件与 hook（后续任务），React 仅为 peerDependency。
+- `rustdesk-web-react`：React 组件与 hook；React 仅为 peerDependency。
+  `useRustDeskSession` 是 headless React 入口（见下文 P4-2）。
 - `rustdesk-web-react/core`：不依赖 React 的会话/协议类型与错误类，可用于
   Node/Worker 测试；`RustDeskSession` 是无 UI 的会话入口（见下文 P4-1）。
 - 配置字段见 `src/session/options.ts`；状态机取值见 `src/session/state.ts`；
@@ -203,7 +204,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 6 个 Playwright 测试：
+  Chromium/Chrome，当前跑 7 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -217,7 +218,10 @@ npm run dev          # demo，http://localhost:5173
   5. 同一页面用 `hasTouch` + CDP 多指触摸验证 tap/双击/长按/拖动/双指滚动/
      捏合本地缩放、`touch-action:none` 不滚页面、禁用和画布黑边（P3-4）；
   6. `demo/clipboard-test.html` 授予 clipboard-read/write 权限，验证真实浏览器
-     剪贴板的自动复制、压缩文本、点击读取本地剪贴板发送和失败后的手动复制（P3-5）。
+     剪贴板的自动复制、压缩文本、点击读取本地剪贴板发送和失败后的手动复制（P3-5）；
+  7. `demo/strict-test.html` 在 React 18 StrictMode 下挂载 `useRustDeskSession`，
+     连接测试进程内的裸 WebSocket server，断言 StrictMode 双挂载后只有一个
+     live socket，卸载后为 0（P4-2）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -511,6 +515,46 @@ npm run dev          # demo，http://localhost:5173
   `disable_keyboard` 协议字段与运行中 `Misc.option` 切换；Android Map 模式/
   触摸对端策略（P5-2）。
 - P4-1 验收为状态转换与 mock 集成，无需真机；真实 hbbs/client 连接留待 P5-5。
+
+## React hook（P4-2，已完成）
+
+- `src/react/useRustDeskSession.ts`（根入口导出）：`useRustDeskSession(config,
+  options?)` 为每个挂载/连接配置代次创建一个 `RustDeskSession`，在 effect 中
+  创建（不在 render，SSR 安全），订阅事件，并在配置变化/卸载时 `dispose()`。
+- 返回值：`session`（P4-3 用于 `setVideoSink`/`bindInputs`/输入/剪贴板/工具
+  方法）、`status`/`statusEvent`（含 `password-required` 的 `retry`/`detail`）、
+  `peerInfo`、`error`、`clipboard`（含 `copied`）、`permission`（初始策略来自
+  session）、`securityDowngrade`，以及 `connect(password?)`/`login(password)`/
+  `disconnect()`。`connect(password)` 在 `password-required` 时用同一 Hash 登录；
+  其他状态使用会话配置连接。
+- StrictMode：第一个 effect 的 cleanup 会 `dispose()` 当前 session（同步
+  abort/关闭 socket），第二个 effect 创建新 session；事件带 session 身份检查，
+  旧 session 不会写 React state。jsdom 测试用真实 session + fake transport
+  断言第一个连接对象已关闭；`demo/strict-test.html` + 裸 WebSocket server 的
+  Playwright 用例在真实浏览器中验证同时只有一个 live socket、卸载后为 0。
+- 卸载/配置变化：cleanup 取消订阅、清空进行中的 connect 引用并 `dispose`
+  （WS/worker/timers/listeners）。`readOnly`/`disableClipboard` 通过 session
+  setter 实时应用，不重连（P4-1 的 LoginRequest 选项也读取权限状态）；
+  `autoConnect` 只在创建时读取；connection identity/login-time 配置变化会重建
+  session，密码变化也会重建（P4-4 表单应保持草稿在组件内、提交时才作为配置
+  传入）。
+- SSR：render 期间不创建 session，首屏为 `idle`/`session:null`；
+  `tests/use-rustdesk-session-ssr.test.tsx` 在 Node 环境用 `renderToString`
+  验证。回调从 ref 读取，不触发重连；`createSession` 是稳定的测试注入点
+  （默认 `new RustDeskSession`）。
+- P4-3 接线：使用返回的 `session` 完成 `setVideoSink`/`bindInputs`/canvas/
+  input/剪贴板/工具栏；把 `statusEvent.detail` 映射为
+  `PasswordPrompt.error`、`clipboard.text` 映射为 `onClipboard(text)`。
+  `onStats`/fps 仍延迟（P5-3）。控制器焦点门控必须与权限 policy 取交集。
+- 验证：`tests/use-rustdesk-session.test.tsx`（7 项：自动连接/事件转发、
+  StrictMode 首连接关闭、password-required 后用 `connect(password)` 登录、
+  `readOnly` 实时应用不重连、配置变化重建、disconnect 后 connect、错误回调）、
+  `tests/use-rustdesk-session-ssr.test.tsx`（1 项）、
+  `tests/e2e/strict-mode.spec.ts`（真实浏览器 StrictMode + 裸 WS server：仅
+  1 个 live socket，卸载后 0）。`tests/mocks/fake-connection.ts` 抽取了 P4-1/
+  P4-2 共用的 fake relay 与登录消息。
+- 无需真机：P4-2 验收是 React 生命周期/清理与 SSR；真实 RustDesk 连接留待
+  P3 真机/P5-5。
 
 ## 本机 Docker 真连环境（P1-9）
 
