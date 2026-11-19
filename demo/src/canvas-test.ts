@@ -6,6 +6,7 @@ import {
   bytesFromBase64,
   createCheckDecoder,
   drawVp9Frame,
+  measureFps,
   mountRenderer,
   readPixel,
   setStatus,
@@ -82,12 +83,10 @@ async function runCanvasTest(): Promise<CanvasCheckResult> {
   const fpsFixture = encoded[0];
   if (!fpsFixture) throw new Error('canvas test: no VP9 fixtures');
   setStatus('measuring FPS…');
-  const started = performance.now();
-  for (let index = 0; index < ITERATIONS; index += 1) {
-    await drawFrame(fpsFixture.bytes);
-  }
-  const elapsedMs = performance.now() - started;
-  const fps = elapsedMs > 0 ? (ITERATIONS * 1000) / elapsedMs : 0;
+  const { fps } = await measureFps(
+    () => drawFrame(fpsFixture.bytes),
+    ITERATIONS,
+  );
 
   setStatus(`done: ${frames.length} fixtures, ${fps.toFixed(1)} fps`);
   return {

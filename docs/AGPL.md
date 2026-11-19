@@ -57,9 +57,9 @@ NOTICE/版权声明。来源通知保留上游仓库名/分支；本项目使用
 - 本仓库包含完整的 TypeScript 源码、构建配置、`proto/` 参考和资源许可文件。
 - `package.json` 的 `files` 是打包内容的唯一权威：当前包含 `dist`、`assets`、
   `docs`、`src`、`proto`、构建配置、`scripts/lib`、`scripts/check-size.mjs`、
-  `scripts/copy-notices.mjs`、demo 的 README/env 模板、`NOTICE` 和
-  `THIRD_PARTY_NOTICES.md`；可执行 bin 由 `bin` 字段自动包含，`LICENSE`/`README`
-  由 npm 自动包含。`npm pack` 会把这些一起打包。
+  `scripts/check-js-size.mjs`、`scripts/copy-notices.mjs`、demo 的 README/env
+  模板、`NOTICE` 和 `THIRD_PARTY_NOTICES.md`；可执行 bin 由 `bin` 字段自动包含，
+  `LICENSE`/`README` 由 npm 自动包含。`npm pack` 会把这些一起打包。
 - `dist/notices/` 在构建后按仓库相对路径镜像 `LICENSE`、`NOTICE`、
   `THIRD_PARTY_NOTICES.md`、`docs/AGPL.md`、`src/protocol/NOTICE.md`、
   `src/input/NOTICE.md` 和 `assets/ogv/` 的许可文件，方便只分发 `dist/` 的宿主

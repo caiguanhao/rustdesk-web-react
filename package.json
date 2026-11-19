@@ -21,6 +21,7 @@
     "vite.config.ts",
     "scripts/copy-notices.mjs",
     "scripts/check-size.mjs",
+    "scripts/check-js-size.mjs",
     "scripts/lib",
     "demo/README.md",
     "demo/.env.example"
@@ -59,7 +60,8 @@
     "dev:peer": "tsx scripts/controlled-peer.ts",
     "log-server": "node scripts/event-log-server.mjs",
     "copy-assets": "node bin/rustdesk-react.mjs copy-assets demo/public",
-    "check-size": "node scripts/check-size.mjs"
+    "check-size": "node scripts/check-size.mjs && node scripts/check-js-size.mjs",
+    "check-js-size": "node scripts/check-js-size.mjs"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

@@ -37,3 +37,10 @@ The 64x64 size keeps the fixtures tiny; `demo/src/canvas-test.ts` resizes the
 container to verify letterboxing. Paste the base64 into `VP9_FIXTURES`; the
 Playwright test derives fixture names and dimensions from the same module.
 
+`vp9-perf.ts` is a separate 1280x720 testsrc2 keyframe for P5-3
+(`demo/perf-test.html` / `tests/e2e/perf.spec.ts`). It is synthetic and larger
+(~76 KiB base64); it is not shipped and does not count toward the runtime
+asset budget. Regenerate with the same two commands above, replacing the
+`color=...:size=64x64` input with `testsrc2=size=1280x720` and writing the
+base64 to `vp9-perf.ts`.
+

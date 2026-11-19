@@ -57,6 +57,7 @@ Demo（仅仓库 checkout）：`npm run dev` 打开表单；`VITE_RD_*` 模板�
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 端口/URL、nginx/Caddy 反代、HTTP/HTTPS/LAN、资源复制、CSP、server key、超时 |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 按阶段/错误码/反代/资源/移动端的排查 |
 | [docs/AGPL.md](docs/AGPL.md) | 复用来源、NOTICE、源码可得性与宿主义务 |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | 初始 JS/资源预算、启动/首帧/FPS/内存实测与方法 |
 | [demo/README.md](demo/README.md) | demo 表单、env 模板、持久化与密码卫生 |
 
 ## 当前状态（仓库开发信息，2026-11-20）
@@ -157,8 +158,9 @@ npm install
 npm run typecheck    # tsc strict 检查（不产出文件）
 npm run build        # Vite library mode + tsc 类型声明 → dist/，并复制 dist/notices/
 npm run test         # Vitest
-npm run test:canvas  # Playwright e2e 测试（9 个，明细见 P2-5）
+npm run test:canvas  # Playwright e2e 测试（10 个，明细见 P2-5）
 npm run test:decoder # headless Chrome 解码器/渲染检查（需本机 Chrome）
+npm run check-size   # 资源 + 初始 JS gzip 预算
 npm run copy-assets  # 把 assets/ogv 复制到 demo/public/rustdesk-assets/
 npm run dev          # demo，http://localhost:5173
 ```
@@ -268,7 +270,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 9 个 Playwright 测试：
+  Chromium/Chrome，当前跑 10 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -293,6 +295,9 @@ npm run dev          # demo，http://localhost:5173
   9. `demo/index.html` 填写 P4-4 表单并对裸 WS server 发起真实 rendezvous
      连接，验证只保留一个 live socket、非密码字段写入 localStorage、密码
      不出现在 storage/console，重载后非密码字段恢复（P4-4）。
+  10. `demo/perf-test.html` 加载真实 ogv/WASM，解码 1280x720 synthetic
+      keyframe，测首帧/解码器/FPS，并通过 CDP 强制 GC 记录 JS heap 增长
+      （P5-3）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -707,6 +712,17 @@ npm run dev          # demo，http://localhost:5173
   Playwright 9 passed；typecheck/build 通过。
 - 无需真机：P4-4 验收是表单接线/持久化/密码卫生；完整 RustDesk 握手继续由
   P1-8 mock、P1-9 隔离 Docker 真连与 P5-5 真实环境覆盖。
+
+## 性能与体积（P5-3，已完成）
+
+- 预算：初始 JS gzip **<250 KiB（不含 React）**、运行时资源 **<1.5 MiB**。
+  `npm run check-size` 同时执行资源校验与 `scripts/check-js-size.mjs`（Vite
+  测量构建）；`npm run build` 的 prebuild 强制执行，当前余量很大。
+- 启动/首帧/解码 FPS/页面 JS heap 的验收下限、实测数字、环境和方法见
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md)；`tests/e2e/perf.spec.ts` 会断言
+  这些下限。
+- 数据来自本地合成 keyframe/管线，不是远程网络或真机；P5-1/P5-2/P5-5 仍需
+  真机/授权验收。
 
 ## 本机 Docker 真连环境（P1-9）
 

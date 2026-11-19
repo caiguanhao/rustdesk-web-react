@@ -103,3 +103,19 @@ export async function drawVp9Frame(
   });
   return size;
 }
+
+/** Sequential decode+draw benchmark with an optional warmup. */
+export async function measureFps(
+  draw: () => Promise<unknown>,
+  iterations: number,
+  warmup = 0,
+): Promise<{ fps: number; elapsedMs: number }> {
+  for (let index = 0; index < warmup; index += 1) await draw();
+  const started = performance.now();
+  for (let index = 0; index < iterations; index += 1) await draw();
+  const elapsedMs = performance.now() - started;
+  return {
+    fps: (iterations * 1000) / elapsedMs,
+    elapsedMs,
+  };
+}
