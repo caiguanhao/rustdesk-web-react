@@ -58,7 +58,7 @@ export type RustDeskErrorCode =
   | 'protocol-error'
   /** Remote-supplied error string not otherwise classified. */
   | 'peer-error'
-  /** Decoder worker/WASM assets could not be loaded. */
+  /** A required runtime asset (decoder worker/WASM, crypto library) failed to load. */
   | 'asset-load-failed'
   /** Reverse proxy/server rejected an oversized message (e.g. WebSocket 1009). */
   | 'message-too-large';

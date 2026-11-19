@@ -56,6 +56,11 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   无长度前缀），Promise 队列 + open/next 超时，关闭码 1009 映射为
   `message-too-large`；`setCipher` 供 P1-5 安装 secretbox（只作用于
   `Message`，不含 rendezvous 帧）。
+- `src/crypto/`：按需动态加载 libsodium（不进入首屏包）；Ed25519
+  `crypto_sign_open` 验签、X25519 `crypto_box_easy`（24 字节零 nonce）、
+  secretbox 小端计数 nonce（从 1 开始，收发独立，MAC 失败后密码器失效）、
+  `SHA256(password||salt)` + `SHA256(h1||challenge)`；固定向量见
+  `tests/crypto.test.ts`。
 
 ## 开发
 
