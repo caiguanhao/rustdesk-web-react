@@ -10,6 +10,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 .temp/
+demo/.env.local
 
 # Node modules (if using Node.js projects)
 node_modules/
