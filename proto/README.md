@@ -8,8 +8,9 @@ for field reference only:
 - `rendezvous.proto` — `libs/hbb_common/protos/rendezvous.proto`
 
 Runtime code uses the ts-proto modules in `src/protocol/` (vendored from the
-web client v1); nothing imports these files. They are AGPL-3.0-or-later, see
-the repository-root `LICENSE`.
+web client v1); nothing imports these files. They are AGPL-3.0 (no explicit
+"or later" grant was found in the upstream snapshot; see the repository-root
+`LICENSE` and `NOTICE`).
 
 ## Legacy v1 name mapping
 

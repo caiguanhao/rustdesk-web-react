@@ -6,47 +6,102 @@
 - MVP：视频 + 鼠标/键盘 + iOS/Android 触控 + 双向文本剪贴板。
 - 非 MVP：音频、多屏、文件传输。
 
-## 当前状态 (2026-11-20)
+## 快速开始
 
-- 包脚手架已就绪：Vite library mode、tsconfig strict、Vitest、demo 骨架；
-  公共入口为 `.`（`src/index.ts`）和 `./core`（`src/core.ts`）。
+要求：Node.js >= 20.19、React 18/19；浏览器需支持 WebSocket、WebAssembly、
+ES2020（iOS 15+）。本仓库当前是 `private: true`、版本 `0.0.0`，未发布到 npm；
+从仓库或本地 tarball/workspace 引用。
+
+```bash
+npm install
+npm run build
+npm run copy-assets          # demo: demo/public/rustdesk-assets/
+# 安装到宿主后:
+npx rustdesk-react copy-assets <host-public-dir>
+```
+
+资源必须与页面**同源**（相对 `document.baseURI` 校验，建议固定
+`base-uri 'self'`）；默认 `assetBaseUrl` 为 `/rustdesk-assets/`。
+
+```tsx
+import { RustDeskViewer } from 'rustdesk-web-react';
+
+export function RemotePanel() {
+  return (
+    <RustDeskViewer
+      server="rd.example.com"                 // 或 host:21116
+      serverKey="<hbbs base64 公钥>"           // 自建服务器必填
+      id="123456789"
+      password="<设备密码>"                    // 也可省略，使用内置密码表单
+      assetBaseUrl="/rustdesk-assets/"
+      readOnly={false}
+      onStatusChange={(event) => console.log('status', event.status)}
+      onError={(error) => console.warn('rustdesk', error.code, error.message)}
+    />
+  );
+}
+```
+
+Headless（自绘 UI）：从 `rustdesk-web-react/core` 导入 `RustDeskSession`；
+`connect`/`setVideoSink`/`on`/`bindInputs` 的完整签名和事件见
+[docs/API.md](docs/API.md#rustdesksession)。
+
+Demo（仅仓库 checkout）：`npm run dev` 打开表单；`VITE_RD_*` 模板见
+`demo/.env.example`，说明见 `demo/README.md`。不要提交 `demo/.env.local`。
+
+详细文档：
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/API.md](docs/API.md) | Viewer props/ref/labels、hook、Session、配置、事件、错误码、限制 |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 端口/URL、nginx/Caddy 反代、HTTP/HTTPS/LAN、资源复制、CSP、server key、超时 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 按阶段/错误码/反代/资源/移动端的排查 |
+| [docs/AGPL.md](docs/AGPL.md) | 复用来源、NOTICE、源码可得性与宿主义务 |
+| [demo/README.md](demo/README.md) | demo 表单、env 模板、持久化与密码卫生 |
+
+## 当前状态（仓库开发信息，2026-11-20）
+
+- 包脚手架/构建/测试已就绪：Vite library mode、tsconfig strict、Vitest、
+  Playwright、`rustdesk-react copy-assets` CLI；公共入口为 `.`
+  （`src/index.ts`）和 `./core`（`src/core.ts`）。
 - `RustDeskViewer` 已可嵌入宿主 React 页面：canvas/letterbox、状态与密码
   覆盖层、错误重试、工具栏、输入/触摸/IME/剪贴板接线和 ref 命令均可用；
   真实 iOS/Android 触摸/软键盘/剪贴板仍待 P3/P5 真机验收。
 - 硬约束：仅 VP9、库内不使用 Flutter/CanvasKit/gstatic/FFmpeg WASM；最终验收只读连接用户现有 hbbs/client。
 
-## 公共 API 骨架
+## API 入口
 
-```tsx
-import { RustDeskViewer, useRustDeskSession } from 'rustdesk-web-react';
-import type {
-  RustDeskViewerProps,
-  RustDeskViewerRef,
-  RustDeskErrorCode,
-  PeerInfo,
-  RustDeskStatusEvent,
-} from 'rustdesk-web-react';
-import {
-  RustDeskError,
-  RustDeskSession,
-  DEFAULT_ASSET_BASE_URL,
-} from 'rustdesk-web-react/core';
-```
-
-- `rustdesk-web-react`：React 组件与 hook；React 仅为 peerDependency。
-  `RustDeskViewer` 是开箱即用的嵌入组件（见下文 P4-3）；
-  `useRustDeskSession` 是 headless React 入口（见下文 P4-2）。
-- `rustdesk-web-react/core`：不依赖 React 的会话/协议类型与错误类，可用于
-  Node/Worker 测试；`RustDeskSession` 是无 UI 的会话入口（见下文 P4-1）。
-- 配置字段见 `src/session/options.ts`；状态机取值见 `src/session/state.ts`；
-  错误码见 `src/session/errors.ts`。
+- `rustdesk-web-react`：`RustDeskViewer`（开箱 UI）、`useRustDeskSession`
+  （headless React），并重导出 `core` 的全部公开 API。React 仅是 peerDependency。
+- `rustdesk-web-react/core`：不依赖 React 的 `RustDeskSession`、配置、状态、
+  错误、PeerInfo/权限/媒体/资源类型与 `assetUrl`/`resolveAssetBaseUrl` 工具。
+  它**不**导出 `Message`/`Clipboard` 等协议 wire 类型；`SessionPermissions` 只以
+  类型导出，宿主不能构造它。
+- 完整字段/默认值/事件/错误码见 **[docs/API.md](docs/API.md)**。源码入口：
+  `src/session/options.ts`（配置）、`src/session/state.ts`（状态）、
+  `src/session/errors.ts`（错误码）。
 - `npm run build` 后 `dist/` 同时包含 ESM（`index.js`、`core.js`）和对应的
   `.d.ts`；`core.js` 不 import React。
+
+## 许可与源码
+
+本项目的原创代码以 **AGPL-3.0-or-later** 提供；复用的 RustDesk web client
+协议/键盘表文件是 **AGPL-3.0（only；上游快照未确认 or-later）**，组合分发按
+AGPL-3.0 履行。请保留 LICENSE/NOTICE，并按 AGPL §4–§6（修改并以网络交互时还有
+§13）提供对应源码。完整的打包清单、来源与宿主义务见
+**[docs/AGPL.md](docs/AGPL.md)**；依赖许可见 `THIRD_PARTY_NOTICES.md`。这不是
+法律意见。
+
+## 实现记录
+
+以下按阶段保留协议/实现细节，供维护者参考；集成方优先阅读上面的快速开始与
+`docs/`。Docker/真机测试脚本属于仓库开发工具，
+不随 npm 包发布。
 
 ## 协议层（P1-1）
 
 - `src/protocol/message.ts`、`rendezvous.ts`：直接复用 rustdesk-web v1 的
-  ts-proto 生成代码（AGPL-3.0-or-later），并补上 MVP 所需的
+  ts-proto 生成代码（AGPL-3.0 only），并补上 MVP 所需的
   `Clipboard.format`、`MultiClipboards`、`KeyEvent.mode`、`VideoFrame.display`、
   `LoginRequest.version/my_platform`、`PublicKey.kx_version`、`Message.peer_info`
   （field 25，会话中 display 列表同步）。
@@ -99,13 +154,17 @@ import {
 
 ```bash
 npm install
-npm run typecheck  # tsc strict 检查（不产出文件）
-npm run build      # Vite library mode + tsc 类型声明 → dist/
+npm run typecheck    # tsc strict 检查（不产出文件）
+npm run build        # Vite library mode + tsc 类型声明 → dist/，并复制 dist/notices/
 npm run test         # Vitest
-npm run test:canvas  # Playwright 画布/鼠标/键盘测试（需 Chrome 或 npx playwright install chromium）
+npm run test:canvas  # Playwright e2e 测试（9 个，明细见 P2-5）
 npm run test:decoder # headless Chrome 解码器/渲染检查（需本机 Chrome）
+npm run copy-assets  # 把 assets/ogv 复制到 demo/public/rustdesk-assets/
 npm run dev          # demo，http://localhost:5173
 ```
+
+资源复制 CLI 也可直接使用：`node bin/rustdesk-react.mjs copy-assets <publicDir>`
+（安装包后为 `npx rustdesk-react copy-assets <publicDir>`）。
 
 - 相对导入在 `src/` 内使用显式 `.js` 后缀（编译到 `.d.ts` 后兼容 NodeNext 消费者）。
 - `npm run build` 不经 `vite-plugin-dts`：先 `vite build` 输出 ESM，再用
@@ -115,13 +174,15 @@ npm run dev          # demo，http://localhost:5173
 ## 目录
 
 - `src/` — 库源码（`protocol/`、`crypto/`、`media/`、`input/`、`session/`、`react/`）
+- `bin/` — `rustdesk-react copy-assets` CLI
+- `docs/` — API、部署、故障排查、AGPL 文档
 - `proto/` — RustDesk 1.5.3 protobuf 定义（参考）
-- `assets/ogv/` — VP9 解码器资源
-- `demo/` — React demo
-- `tests/` — Vitest + mock WS server 测试
+- `assets/ogv/` — VP9 解码器资源及许可文件
+- `demo/` — React demo（P4-4 表单）
+- `tests/` — Vitest、Playwright、mock WS server 测试
+- `scripts/` — 构建/资源/反代测试脚本
 - `test-fixtures/` — 真连测试用的静态页面
-
-部分目录由后续任务（P0/P1）创建。
+- `THIRD_PARTY_NOTICES.md` — 第三方依赖许可
 
 ## 视频解码（P2-1）
 
@@ -637,7 +698,9 @@ npm run dev          # demo，http://localhost:5173
   state/session config，提交后清空，不写 storage/URL/console；
   `VITE_RD_*` 是首次默认值，模板见 `demo/.env.example`，用户复制为
   gitignored 的 `demo/.env.local`。HTTP/HTTPS/WSS、LAN、端口偏移、混合
-  内容、安全上下文/剪贴板、资源同源与排错见 `demo/README.md`。
+  内容、安全上下文/剪贴板、资源同源与排错见
+  [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) 与
+  [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 - 验证：`tests/e2e/demo.spec.ts`（真实 Chromium；填表→viewer→裸 WS server
   一个 live client；只保存非密码字段；console 无密码；关闭后 socket 归零
   且密码框清空；重载恢复非密码字段）。`npm test` 406 passed/1 skipped；
@@ -677,5 +740,5 @@ npm run dev           # 打开 demo，填写 Server/Server Key/Device ID/Passwor
 - `~/work/source/rustdesk` — 上游 RustDesk（只读）
 - `~/work/source/rustdesk-web` — web v1/v2 构建产物（只读）
 
-`demo/.env.local` 仅存在于本机，可能含密码，绝不提交；模板见
-`demo/.env.example`，用法/HTTPS/LAN 说明见 `demo/README.md`。
+`demo/.env.local` 仅存在于本机，可能含密码，绝不提交；模板与用法见
+`demo/README.md`。

@@ -1,11 +1,17 @@
 /**
  * Shared manifest verification for the vendored ogv VP9 assets. Used by
- * `check-size.mjs`, `copy-assets.mjs` and (indirectly) the test suite so the
+ * `check-size.mjs`, the copy-assets CLI and (indirectly) the test suite so the
  * size/SHA-256 rules exist once.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** Normalized vendored asset directory; shared by all build/copy scripts. */
+export const ASSET_DIR = resolve(
+  fileURLToPath(new URL('../../assets/ogv/', import.meta.url)),
+);
 
 export function readManifest(assetDir) {
   return JSON.parse(readFileSync(join(assetDir, 'manifest.json'), 'utf8'));

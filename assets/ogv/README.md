@@ -16,7 +16,8 @@ demuxers, no audio decoders and no other video codecs.
 
 `manifest.json` records sizes and SHA-256 of every file; `scripts/check-size.mjs`
 verifies it and enforces the asset budget, and
-`node scripts/copy-assets.mjs <publicDir>` copies the files into
+`npx rustdesk-react copy-assets <publicDir>` (or `npm run copy-assets` in the
+repository demo) copies the files into
 `<publicDir>/rustdesk-assets/` — the location behind the default
 `assetBaseUrl` (`/rustdesk-assets/`).
 

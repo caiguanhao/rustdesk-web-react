@@ -1,10 +1,11 @@
 # Demo
 
-`npm run dev` starts this Vite app and (via `predev`) copies the VP9 assets to
-`demo/public/rustdesk-assets/`. Open the printed URL, fill the form and press
-Connect. The page embeds `<RustDeskViewer autoConnect />`; the viewer owns the
-canvas, overlays, toolbar and input wiring. The viewer/protocol/renderer code
-is lazy-loaded after Connect, so the form itself stays light.
+From the repository root, `npm run dev` starts this Vite app and (via `predev`)
+copies the VP9 assets to `demo/public/rustdesk-assets/`. Open the printed URL,
+fill the form and press Connect. The page embeds `<RustDeskViewer autoConnect />`;
+the viewer owns the canvas, overlays, toolbar and input wiring. The
+viewer/protocol/renderer code is lazy-loaded after Connect, so the form itself
+stays light.
 
 ```bash
 npm run dev
@@ -55,39 +56,18 @@ password or server key.
   `onPasswordRequired`) ask for it. Wrong-password retries stay on the same
   connection/Hash.
 
-## HTTP, HTTPS and LAN
+## Network, assets and troubleshooting
 
-- The page protocol chooses the WebSocket scheme: an HTTPS page uses `wss://`,
-  an HTTP page (including LAN) uses `ws://`.
-- `Server` accepts `host` or `host:port`:
-  - with an explicit port, the rendezvous WS port is `port + 2` and the
-    fallback relay WS port is `port + 3` (e.g. `21116` → `21118` / `21119`);
-  - on an HTTPS page without a port, the client uses the reverse-proxy path
-    `wss://<host>/ws/id` (relay: `/ws/relay`).
-- The browser must reach hbbs (WS, normally 21118) and hbbr (WS, normally
-  21119), not just the UDP/TCP rendezvous ports. For a LAN demo, allow those
-  ports or put both behind the same TLS reverse proxy.
-- **Mixed content**: an HTTPS admin page cannot open a plain `ws://` socket.
-  Use a valid TLS certificate + WSS reverse proxy, or open the demo over HTTP
-  on a trusted network. The library rejects an explicit `ws://` URL on an
-  HTTPS page with `invalid-config`.
-- **Clipboard**: browsers expose the clipboard only in a secure context
-  (HTTPS or `localhost`). On a plain-HTTP LAN page, remote video/input can
-  still work, but auto-copy may be blocked; the viewer then shows its manual
-  "Copy" button. Always click a control before granting clipboard access.
-- **Assets**: `assetBaseUrl` must be same-origin (Workers/WASM). Leave the
-  field empty to use the viewer's default `/rustdesk-assets/`. In a host app,
-  copy `assets/ogv/` with the package's copy-assets command instead of the
-  demo's Vite public directory; see the root README.
+The demo only passes the form values to the viewer. For the host-integration
+rules — HTTP vs HTTPS/WSS, `host:port` +2/+3 port shifts, reverse-proxy paths,
+LAN reachability, mixed content, secure-context clipboard, CSP and
+`assetBaseUrl` — use the canonical [deployment guide](../docs/DEPLOYMENT.md).
+Error codes and proxy/asset diagnostics are in
+[TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md).
 
-## Troubleshooting
+Demo-specific notes:
 
-- `asset-load-failed` / 404s: run `npm run copy-assets` (or use `npm run dev`,
-  whose `predev` does it) and check `Asset Base URL`.
-- Secure handshake errors: check `Server Key` (base64, from the same hbbs). A
-  key mismatch fails closed unless the config opts into the insecure fallback.
-- Stuck at connecting/securing: hbbs/hbbr WS ports are unreachable, the server
-  has no peer with that Device ID, or the controlled peer has not registered.
-  The Docker setup prints the expected ports/key at startup.
-- Wrong password: the viewer shows the retry prompt/detail. It never puts the
-  password in the URL or storage.
+- The Vite page is plain HTTP, so the demo uses `ws://`; for a LAN demo allow
+  the hbbs/hbbr WebSocket ports (or put them behind the same TLS proxy).
+- Leave `Asset Base URL` empty to use the viewer's default `/rustdesk-assets/`;
+  `predev` copies the assets into `demo/public/rustdesk-assets/`.

@@ -12,8 +12,12 @@ against RustDesk 1.5.3 (`src/keyboard.rs`, `src/server/input_service.rs`).
   `No` (Linux X11 keycodes), `Oo` (Android keycodes), `Uo` (macOS virtual
   keycodes), `Wo`/`Vo` (printable/numpad sets) and the CapsLock/NumLock
   snapshot logic.
-- License: GNU AGPL-3.0-or-later, the same license as this project. The full
-  text is in the repository-root `LICENSE`; upstream ships it as `LICENCE`.
+- License: GNU AGPL-3.0. The AGPLv3 text is in the repository-root `LICENSE`;
+  the RustDesk core project ships its `LICENCE` (AGPLv3). The rustdesk-web
+  snapshot contains no license file, and no explicit "or later" grant was
+  found in it; do not assume one for these keymap tables without confirming
+  upstream. The rest of this project's original code is offered under
+  AGPL-3.0-or-later.
 - Local modifications: tables converted to TypeScript and limited to the
   entries used by Map mode; Keys are looked up by `event.code`; macOS ISO
   Backquote/IntlBackslash swap and the optional Ctrl/Meta swap are preserved.

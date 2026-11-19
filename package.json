@@ -10,8 +10,24 @@
   },
   "files": [
     "dist",
-    "assets"
+    "assets",
+    "docs",
+    "src",
+    "proto",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md",
+    "tsconfig.json",
+    "tsconfig.build.json",
+    "vite.config.ts",
+    "scripts/copy-notices.mjs",
+    "scripts/check-size.mjs",
+    "scripts/lib",
+    "demo/README.md",
+    "demo/.env.example"
   ],
+  "bin": {
+    "rustdesk-react": "./bin/rustdesk-react.mjs"
+  },
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -31,6 +47,8 @@
     "predev": "npm run copy-assets",
     "build": "vite build && tsc -p tsconfig.build.json",
     "prebuild": "npm run check-size",
+    "postbuild": "node scripts/copy-notices.mjs",
+    "prepack": "npm run build 1>&2",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,7 +58,7 @@
     "dev:server": "bash scripts/dev-server.sh",
     "dev:peer": "tsx scripts/controlled-peer.ts",
     "log-server": "node scripts/event-log-server.mjs",
-    "copy-assets": "node scripts/copy-assets.mjs demo/public",
+    "copy-assets": "node bin/rustdesk-react.mjs copy-assets demo/public",
     "check-size": "node scripts/check-size.mjs"
   },
   "peerDependencies": {

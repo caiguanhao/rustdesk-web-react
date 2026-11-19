@@ -6,12 +6,10 @@
  * Run by `npm run build` (prebuild) and by the asset test. Exits non-zero on
  * any missing file, size/hash mismatch, stray file, or budget overrun.
  */
-import { fileURLToPath } from 'node:url';
-import { verifyAssets } from './lib/ogv-assets.mjs';
+import { ASSET_DIR, verifyAssets } from './lib/ogv-assets.mjs';
 
 const BUDGET_BYTES = 1.5 * 1024 * 1024;
-const assetDir = fileURLToPath(new URL('../assets/ogv/', import.meta.url));
-const { manifest, rows, total, failures } = verifyAssets(assetDir);
+const { manifest, rows, total, failures } = verifyAssets(ASSET_DIR);
 
 const width = Math.max(...rows.map((row) => row.name.length), 4);
 console.log(`${manifest.name} ${manifest.version} (${manifest.source})`);

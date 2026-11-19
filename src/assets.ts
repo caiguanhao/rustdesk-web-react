@@ -2,7 +2,7 @@
  * Static decoder assets and URL helpers.
  *
  * The library ships no bundled WASM: host apps copy `assets/ogv/` into their
- * own public directory (`scripts/copy-assets.mjs`) and pass that location as
+ * own public directory (`rustdesk-react copy-assets`) and pass that location as
  * `assetBaseUrl`. Workers and WASM must be served from the same origin as the
  * page, so `resolveAssetBaseUrl` rejects cross-origin bases instead of letting
  * the decoder fail later with an opaque worker error.

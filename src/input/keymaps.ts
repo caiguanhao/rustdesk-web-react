@@ -5,7 +5,7 @@
  * interprets chr as a Windows scancode, a Linux X11 keycode (evdev + 8), an
  * Android keycode, or a macOS virtual keycode. Values are transcribed from the
  * rustdesk-web v2 bundle (js/dist/index.js, commit
- * 10a477b67f7411da21fe88f4809eab7cb81e6102, AGPL-3.0-or-later): table Lo
+ * 10a477b67f7411da21fe88f4809eab7cb81e6102, AGPL-3.0): table Lo
  * (DOM code -> name) fed into _e/No/Oo/Uo (per-platform codes). See NOTICE /
  * src/input/NOTICE.md.
  *
