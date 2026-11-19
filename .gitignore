@@ -12,10 +12,14 @@ Thumbs.db
 .temp/
 
 # 私密配置（用户本机创建，可能含密码，绝不提交）
-demo/.env.local
+# Vite 读取整个 .env* 家族，所以全部忽略；只放行将来用于展示的模板。
+demo/.env*
+!demo/.env.example
 
-# Node modules (if using Node.js projects)
+# Node modules and build output
 node_modules/
+dist/
+coverage/
 
 # Python cache (if using Python projects)
 __pycache__/

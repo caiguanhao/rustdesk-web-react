@@ -6,19 +6,26 @@
 - MVP：视频 + 鼠标/键盘 + iOS/Android 触控 + 双向文本剪贴板。
 - 非 MVP：音频、多屏、文件传输。
 
-## 当前状态 (2026-11-19)
+## 当前状态 (2026-11-20)
 
-- 尚无 `package.json`；`npm run build/test/dev` 要等 P0-2 脚手架完成后才可用。
+- 包脚手架已就绪：Vite library mode、tsconfig strict、Vitest、demo 骨架；
+  公共入口为 `.`（`src/index.ts`）和 `./core`（`src/core.ts`）。
 - 硬约束：仅 VP9、库内不使用 Flutter/CanvasKit/gstatic/FFmpeg WASM；最终验收只读连接用户现有 hbbs/client。
 
-## 开发（P0-2 完成后可用）
+## 开发
 
 ```bash
 npm install
-npm run build      # Vite library mode + 类型声明
+npm run typecheck  # tsc strict 检查（不产出文件）
+npm run build      # Vite library mode + tsc 类型声明 → dist/
 npm run test       # Vitest
 npm run dev        # demo，http://localhost:5173
 ```
+
+- 相对导入在 `src/` 内使用显式 `.js` 后缀（编译到 `.d.ts` 后兼容 NodeNext 消费者）。
+- `npm run build` 不经 `vite-plugin-dts`：先 `vite build` 输出 ESM，再用
+  `tsc -p tsconfig.build.json` 只产出 `.d.ts`。
+- demo 通过别名直接引用 `src/`，修改库代码无需先 build。
 
 ## 目录
 
