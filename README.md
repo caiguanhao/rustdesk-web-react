@@ -10,8 +10,9 @@
 
 - 包脚手架已就绪：Vite library mode、tsconfig strict、Vitest、demo 骨架；
   公共入口为 `.`（`src/index.ts`）和 `./core`（`src/core.ts`）。
-- 公共类型/错误/组件骨架已导出（P0-4）；`RustDeskViewer` 目前只渲染布局
-  外壳，ref 方法在 P4-3 之前会抛出明确错误。
+- `RustDeskViewer` 已可嵌入宿主 React 页面：canvas/letterbox、状态与密码
+  覆盖层、错误重试、工具栏、输入/触摸/IME/剪贴板接线和 ref 命令均可用；
+  真实 iOS/Android 触摸/软键盘/剪贴板仍待 P3/P5 真机验收。
 - 硬约束：仅 VP9、库内不使用 Flutter/CanvasKit/gstatic/FFmpeg WASM；最终验收只读连接用户现有 hbbs/client。
 
 ## 公共 API 骨架
@@ -33,6 +34,7 @@ import {
 ```
 
 - `rustdesk-web-react`：React 组件与 hook；React 仅为 peerDependency。
+  `RustDeskViewer` 是开箱即用的嵌入组件（见下文 P4-3）；
   `useRustDeskSession` 是 headless React 入口（见下文 P4-2）。
 - `rustdesk-web-react/core`：不依赖 React 的会话/协议类型与错误类，可用于
   Node/Worker 测试；`RustDeskSession` 是无 UI 的会话入口（见下文 P4-1）。
@@ -163,8 +165,9 @@ npm run dev          # demo，http://localhost:5173
   `webkitfullscreenchange` 触发重排。`requestFullscreen()` 以容器为目标，
   不支持或被拒绝时返回 `false`；`exitFullscreen()` 只退出本渲染器的容器。
   兼容 Safari/iPadOS 15 的 `webkit*` API；iPhone Safari 没有元素全屏，
-  P4-3 应隐藏/禁用按钮。
-- 单测 `tests/renderer.test.ts`（23 项）覆盖 WebGL 选择/回退/失败、
+  P4-3 的工具栏会禁用按钮。`fullscreenSupported`/`fullscreen` getter 与
+  `onFullscreenChange` 让 P4-3 复用同一套探测/监听，不再自行判断前缀。
+- 单测 `tests/renderer.test.ts`（24 项）覆盖 WebGL 选择/回退/失败、
   16:9/4:3/1:1/竖屏/裁剪显示尺寸、resize、0 尺寸、坐标边界、抛错仍释放、
   dispose 和全屏（标准/前缀/不支持/拒绝）。`npm run test:decoder` 额外
   用真实 VP9 帧验证 WebGL 像素回读 `(255,0,0,255)` 及两种容器比例下的
@@ -204,7 +207,7 @@ npm run dev          # demo，http://localhost:5173
 ## Playwright 画布测试（P2-5）
 
 - `npm run test:canvas` 启动 demo Vite（`127.0.0.1:5175`）和 headless
-  Chromium/Chrome，当前跑 7 个 Playwright 测试：
+  Chromium/Chrome，当前跑 8 个 Playwright 测试：
   1. `demo/canvas-test.html` 解码 `test-fixtures/vp9.ts` 的 red/green 64x64
      无损 VP9 keyframe，通过 `VideoRenderer` 绘制，读回 canvas 像素（红/绿）
      证明非空，验证 640x360 与 360x640 容器下的 letterbox 几何
@@ -221,7 +224,11 @@ npm run dev          # demo，http://localhost:5173
      剪贴板的自动复制、压缩文本、点击读取本地剪贴板发送和失败后的手动复制（P3-5）；
   7. `demo/strict-test.html` 在 React 18 StrictMode 下挂载 `useRustDeskSession`，
      连接测试进程内的裸 WebSocket server，断言 StrictMode 双挂载后只有一个
-     live socket，卸载后为 0（P4-2）。
+     live socket，卸载后为 0（P4-2）；
+  8. `demo/viewer-test.html` 在宿主 React 页面（StrictMode）中嵌入
+     `<RustDeskViewer autoConnect={false} readOnly>`，验证 640×360 宿主
+     尺寸、canvas/工具栏/自定义 labels、只读按钮门控、一个 IME textarea
+     （StrictMode 首个挂载已清理）且宿主页面仍可交互（P4-3）。
 - `demo/src/check-harness.ts` 抽取了 P2-1/P2-3/P2-5/P3 页面共用的状态、
   base64、像素回读、快照、renderer 与 decoder 工厂；
   `demo/src/decoder-check.ts` 与输入测试页也使用该模块与共享 fixture。
@@ -542,10 +549,11 @@ npm run dev          # demo，http://localhost:5173
   `tests/use-rustdesk-session-ssr.test.tsx` 在 Node 环境用 `renderToString`
   验证。回调从 ref 读取，不触发重连；`createSession` 是稳定的测试注入点
   （默认 `new RustDeskSession`）。
-- P4-3 接线：使用返回的 `session` 完成 `setVideoSink`/`bindInputs`/canvas/
-  input/剪贴板/工具栏；把 `statusEvent.detail` 映射为
-  `PasswordPrompt.error`、`clipboard.text` 映射为 `onClipboard(text)`。
-  `onStats`/fps 仍延迟（P5-3）。控制器焦点门控必须与权限 policy 取交集。
+- P4-3 已消费这些能力：`RustDeskViewer` 用返回的 `session` 完成
+  `setVideoSink`/`bindInputs`/canvas/input/剪贴板/工具栏；把
+  `statusEvent.detail` 映射为 `PasswordPrompt.error`、`clipboard.text` 映射为
+  `onClipboard(text)`。`onStats`/fps 仍延迟（P5-3）。控制器焦点门控与权限
+  policy 取交集（见下节）。
 - 验证：`tests/use-rustdesk-session.test.tsx`（7 项：自动连接/事件转发、
   StrictMode 首连接关闭、password-required 后用 `connect(password)` 登录、
   `readOnly` 实时应用不重连、配置变化重建、disconnect 后 connect、错误回调）、
@@ -555,6 +563,66 @@ npm run dev          # demo，http://localhost:5173
   P4-2 共用的 fake relay 与登录消息。
 - 无需真机：P4-2 验收是 React 生命周期/清理与 SSR；真实 RustDesk 连接留待
   P3 真机/P5-5。
+
+## Viewer 组件（P4-3，已完成）
+
+- `src/react/RustDeskViewer.tsx`（根入口导出 `RustDeskViewer`、
+  `RustDeskViewerProps`、`RustDeskViewerRef`、`RustDeskViewerLabels`、
+  `PasswordPrompt`）：消费 P4-2 的 `useRustDeskSession`，每个挂载/连接配置
+  代次一个 session；StrictMode 双挂载后只保留一个 session/socket，首个
+  renderer/输入控制器/IME textarea 均在 cleanup 中释放。
+- 视频：挂载时创建一次 `VideoRenderer(canvas, root)`，session 就绪后
+  `setVideoSink(renderer)`；卸载/换 session 时 `setVideoSink(null)` 并 dispose
+  renderer。jsdom/无 canvas 环境创建失败只报 `onError` + notice，不破坏状态/
+  密码 UI。letterbox、全屏请求/退出、`fullscreenSupported`/`fullscreen` 与
+  `onFullscreenChange` 都由 renderer 拥有，viewer 只镜像状态。
+- 输入：创建 Mouse/Keyboard/Touch/Ime 并 attach，再调用
+  `session.bindInputs({ mouse, keyboard, touch, ime })` 应用权限策略、display
+  origin 与 peer platform。viewer 用 `applyInputPolicy` 应用唯一最终门控
+  “policy ∩ status === connected ∩ focus”：键盘监听在 `document` 上，未聚焦/
+  未连接时不会捕获按键；IME textarea 作为 viewer 子节点（`container`），其
+  聚焦算 viewer 焦点，物理键盘仍可用。密码表单只在 password-required（未连接）
+  出现，状态门控已禁用全部输入。
+- 触摸：`applyLocalZoom:false` + `onLocalZoom`，viewer 直接把
+  `translate/scale` 写到 `canvas.style`（绕过 React，避免每个 pointermove
+  一次渲染）；session 离开 active 状态时 `resetLocalZoom()`。
+  `VideoRenderer.toRemote` 读取变换后的 client rect，坐标映射保持一致。
+- 状态/密码/错误：connecting/securing/authenticating 显示 connecting，
+  awaiting-approval 显示等待接受；password-required 先调用
+  `onPasswordRequired({ retry, error: statusEvent.detail })`，返回 string 则
+  自动 `login`，返回 undefined（或 Promise 解析为 undefined）显示内置表单，
+  错误密码重试时显示 detail；表单 Cancel、ref `disconnect()` 与工具栏断开
+  共用一条清理路径。error 覆盖层显示 `RustDeskError.message`/
+  `statusEvent.detail` 并提供 Retry；disconnected 可重新 Connect；idle 显示
+  Connect。非致命 `no-permission`/安全降级显示 6 秒 notice，`onError` 照常
+  转发给宿主。
+- 剪贴板：远端文本自动复制成功回调 `onClipboard(text)`；`copied:false` 时
+  显示手动 Copy 按钮（`copyRemoteText()`，用户手势）；工具栏剪贴板按钮
+  （`labels.clipboard`，title `labels.paste`）调用 `sendLocalClipboard()`
+  完成本地→远端粘贴，受 `clipboardSend` 门控。labels 新增 `copy`/`paste`；
+  `connected` 用于读屏 live region。
+- 工具栏：Ctrl+Alt+Del 仅当 `PeerInfo.sasEnabled` 且 keyboard 权限时显示/
+  启用；全屏按钮按 `fullscreenSupported` 禁用（iPhone Safari 无元素全屏）；
+  Keyboard 按钮调用 `ImeInput.focus()`（用户手势打开软键盘）；Clipboard；
+  Disconnect；readOnly 显示 `labels.readOnly` 并禁用输入按钮。画质固定
+  （MVP，无画质控件）。
+- ref：`connect(password?)`（密码仅用于 session 已处于 password-required 时
+  的同一 Hash 登录；新连接密码仍来自 config/`onPasswordRequired`）、
+  `disconnect()`、`sendCtrlAltDel()`、`setFullscreen(enabled)`、
+  `focusKeyboard()`。
+- `onStats` 仍未产生（fps/decodeMs 延迟到 P5-3；session 只暴露
+  `latencyMs`）。SSR：render 期间不创建 session/DOM，
+  `tests/rustdesk-viewer-ssr.test.tsx` 断言首屏 `idle` shell。
+- 验证：`tests/rustdesk-viewer.test.tsx`（11 项：宿主 labels/尺寸/工具栏、
+  自动连接与 status/peerInfo、host 密码自动登录、内置表单/重试/取消、
+  工具栏命令、readOnly 门控、focus ∩ policy 键盘门控、手动复制、错误 Retry
+  重连、卸载清理、ref）、`tests/rustdesk-viewer-ssr.test.tsx`（1 项）、
+  `tests/e2e/viewer.spec.ts`（真实 Chromium 宿主页面 + StrictMode）。
+  `tests/mocks/fake-yuv-canvas.ts` 供 jsdom 共用。`npm test` 406 passed/
+  1 skipped；Playwright 8 passed；typecheck/build 通过。
+- 无需真机：P4-3 验收是“可嵌入任意 React 页面”，已由 jsdom、SSR 与真实
+  Chromium 覆盖；真实 iOS/Android 的触摸/软键盘/剪贴板仍按 P3/P5 记录为
+  ⏳ 真机待验，未声称真机通过。
 
 ## 本机 Docker 真连环境（P1-9）
 

@@ -45,6 +45,8 @@ export interface VideoRendererOptions {
   webGL?: boolean;
   /** Called whenever the letterbox layout changes. */
   onLayout?: (layout: RendererLayout | null) => void;
+  /** Called when this container enters/leaves fullscreen. */
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }
 
 /** Safari 15/iPadOS still uses the prefixed fullscreen API. */
@@ -91,6 +93,7 @@ export class VideoRenderer implements VideoSink {
   private readonly container: HTMLElement;
   private readonly sink: FrameSink;
   private readonly onLayout?: (layout: RendererLayout | null) => void;
+  private readonly onFullscreenChange?: (fullscreen: boolean) => void;
   private readonly resizeObserver?: ResizeObserver;
   private readonly windowResize?: () => void;
   private readonly fullscreenListener: () => void;
@@ -106,6 +109,7 @@ export class VideoRenderer implements VideoSink {
     this.canvas = canvas;
     this.container = container;
     this.onLayout = options.onLayout;
+    this.onFullscreenChange = options.onFullscreenChange;
 
     canvas.style.display = 'block';
     canvas.style.position = 'absolute';
@@ -129,7 +133,10 @@ export class VideoRenderer implements VideoSink {
       window.addEventListener('resize', this.windowResize);
     }
 
-    this.fullscreenListener = () => this.resize();
+    this.fullscreenListener = () => {
+      this.resize();
+      this.onFullscreenChange?.(this.fullscreen);
+    };
     if (typeof document !== 'undefined') {
       document.addEventListener('fullscreenchange', this.fullscreenListener);
       document.addEventListener('webkitfullscreenchange', this.fullscreenListener);
@@ -139,6 +146,26 @@ export class VideoRenderer implements VideoSink {
 
   get layout(): RendererLayout | null {
     return this.currentLayout;
+  }
+
+  /** Whether this container exposes a usable fullscreen API. */
+  get fullscreenSupported(): boolean {
+    if (this.disposed) return false;
+    const element = this.container as VendorFullscreenElement;
+    return (
+      typeof element.requestFullscreen === 'function' ||
+      typeof element.webkitRequestFullscreen === 'function'
+    );
+  }
+
+  /** True while this renderer's container is the fullscreen element. */
+  get fullscreen(): boolean {
+    if (this.disposed || typeof document === 'undefined') return false;
+    const doc = document as VendorDocument;
+    return (
+      (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) ===
+      this.container
+    );
   }
 
   /** Draw and release one decoded frame (P2-2 VideoSink). */

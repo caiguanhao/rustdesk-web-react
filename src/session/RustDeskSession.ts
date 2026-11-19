@@ -64,9 +64,10 @@ import {
   type InputTarget,
   type PermissionEvent,
 } from './permissions.js';
-import type {
-  RustDeskStatus,
-  RustDeskStatusEvent,
+import {
+  isActiveStatus,
+  type RustDeskStatus,
+  type RustDeskStatusEvent,
 } from './state.js';
 
 export type SessionVideoDecoder = VideoDecoder & { dispose(): void };
@@ -110,15 +111,6 @@ export interface SessionInputTargets {
 type Listener<T> = (payload: T) => void;
 
 const DEFAULT_LOOP_TIMEOUT_MS = 30_000;
-
-const ACTIVE_STATUSES: ReadonlySet<RustDeskStatus> = new Set([
-  'connecting',
-  'securing',
-  'authenticating',
-  'awaiting-approval',
-  'password-required',
-  'connected',
-]);
 
 function abortError(): RustDeskError {
   return new RustDeskError('aborted', 'Session operation aborted');
@@ -250,7 +242,7 @@ export class RustDeskSession {
     if (this.disposed) throw abortError();
     if (this.cleanupPromise) await this.cleanupPromise;
     if (this.disposed) throw abortError();
-    if (ACTIVE_STATUSES.has(this.statusValue)) {
+    if (isActiveStatus(this.statusValue)) {
       throw invalidState('connect');
     }
 
@@ -750,7 +742,7 @@ export class RustDeskSession {
   }
 
   private endDisconnected(detail?: string): void {
-    if (!ACTIVE_STATUSES.has(this.statusValue)) return;
+    if (!isActiveStatus(this.statusValue)) return;
     this.setStatus({ status: 'disconnected', detail });
     void this.cleanupConnection();
   }

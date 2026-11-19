@@ -43,6 +43,26 @@ export type RustDeskStatusEvent =
       detail?: string;
     };
 
+/**
+ * Statuses in which a connection attempt or session is live.
+ *
+ * Shared by `RustDeskSession.connect()` (to reject a second concurrent
+ * connect) and the viewer (to enable Disconnect); keeping one definition
+ * prevents the two from drifting.
+ */
+const ACTIVE_STATUSES: ReadonlySet<RustDeskStatus> = new Set([
+  'connecting',
+  'securing',
+  'authenticating',
+  'awaiting-approval',
+  'password-required',
+  'connected',
+]);
+
+export function isActiveStatus(status: RustDeskStatus): boolean {
+  return ACTIVE_STATUSES.has(status);
+}
+
 /** Delivery statistics emitted by the session, if the host subscribes. */
 export interface SessionStats {
   /** Decoded frames rendered per second. */

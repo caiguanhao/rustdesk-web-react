@@ -42,6 +42,7 @@ interface MountOptions {
   height?: number;
   sink?: FakeSink;
   onLayout?: (layout: RendererLayout | null) => void;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }
 
 function makeSink(): FakeSink {
@@ -88,6 +89,7 @@ function mount(options: MountOptions = {}): Harness {
       layouts.push(layout);
       options.onLayout?.(layout);
     },
+    onFullscreenChange: options.onFullscreenChange,
   });
   return { renderer, sink, canvas, container, layouts, releases: 0 };
 }
@@ -312,6 +314,28 @@ describe('VideoRenderer', () => {
 
     request.mockRejectedValueOnce(new Error('denied'));
     await expect(harness.renderer.requestFullscreen()).resolves.toBe(false);
+  });
+
+  it('exposes fullscreen support/state and notifies on changes', () => {
+    const changes: boolean[] = [];
+    const harness = mount({
+      onFullscreenChange: (fullscreen) => changes.push(fullscreen),
+    });
+    expect(harness.renderer.fullscreenSupported).toBe(false);
+    expect(harness.renderer.fullscreen).toBe(false);
+
+    define(harness.container, 'requestFullscreen', vi.fn(async () => undefined));
+    expect(harness.renderer.fullscreenSupported).toBe(true);
+
+    define(document, 'fullscreenElement', harness.container);
+    document.dispatchEvent(new Event('fullscreenchange'));
+    expect(harness.renderer.fullscreen).toBe(true);
+    expect(changes).toEqual([true]);
+
+    define(document, 'fullscreenElement', null);
+    document.dispatchEvent(new Event('fullscreenchange'));
+    expect(harness.renderer.fullscreen).toBe(false);
+    expect(changes).toEqual([true, false]);
   });
 
   it('reports unsupported fullscreen when the browser has no API', async () => {

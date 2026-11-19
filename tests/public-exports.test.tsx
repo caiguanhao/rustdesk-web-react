@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { createRef } from 'react';
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// jsdom has no drawable canvas; the viewer's renderer is exercised for real in
+// the browser tests. Keep the structural sink shared with the viewer tests.
+vi.mock('yuv-canvas', async () => import('./mocks/fake-yuv-canvas'));
+
 import * as root from '../src/index';
 import * as core from '../src/core';
 import type {
@@ -11,9 +16,13 @@ import type {
   RustDeskViewerRef,
 } from '../src/index';
 
-// P0-4 acceptance: both entries expose a usable API surface, the React shell
-// renders, and unimplemented ref commands fail loudly with a typed error
-// instead of pretending to work.
+// P0-4 acceptance: both entries expose a usable API surface and the React
+// shell renders with host styling. P4-3 replaces the fail-loud ref stubs with
+// commands that safely no-op when no session is connected.
+afterEach(() => {
+  cleanup();
+});
+
 describe('public exports', () => {
   const config: RustDeskSessionConfig = {
     server: 'rd.example.com',
@@ -54,30 +63,22 @@ describe('public exports', () => {
     expect((shell as HTMLElement).style.aspectRatio).toContain('16');
   });
 
-  it('fails loudly on ref commands that P4-3 has not wired yet', () => {
+  it('exposes safe ref commands before a session is connected', async () => {
     const ref = createRef<RustDeskViewerRef>();
-    render(<root.RustDeskViewer {...props} ref={ref} />);
+    const { container } = render(
+      <root.RustDeskViewer {...props} ref={ref} />,
+    );
 
+    expect(container.querySelector('canvas')).not.toBeNull();
     const handle = ref.current;
     expect(handle).not.toBeNull();
     if (!handle) return;
 
-    for (const call of [
-      () => handle.connect(),
-      () => handle.disconnect(),
-      () => handle.sendCtrlAltDel(),
-      () => handle.setFullscreen(true),
-      () => handle.focusKeyboard(),
-    ]) {
-      let thrown: unknown;
-      try {
-        call();
-      } catch (error) {
-        thrown = error;
-      }
-      expect(thrown).toBeInstanceOf(Error);
-      expect((thrown as Error).message).toContain('P4-3');
-    }
+    // autoConnect=false: these must not throw or start a connection.
+    expect(() => handle.disconnect()).not.toThrow();
+    expect(() => handle.sendCtrlAltDel()).not.toThrow();
+    expect(() => handle.focusKeyboard()).not.toThrow();
+    await expect(handle.setFullscreen(false)).resolves.toBeUndefined();
   });
 
   it('carries a stable code and optional cause on RustDeskError', () => {
