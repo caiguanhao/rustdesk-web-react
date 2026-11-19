@@ -187,6 +187,12 @@ export async function secureHandshake(
     throw cause;
   }
 
+  // A peer can close before signing (e.g. rejected while hbbr pairs); report
+  // that as a close rather than a signature failure.
+  if (first.misc?.close_reason) {
+    throw new RustDeskError('peer-closed', first.misc.close_reason);
+  }
+
   const signedId = first.signed_id;
   if (!signedId || signedId.id.length === 0) {
     return fail('peer-signature-invalid', 'Peer did not send a SignedId');

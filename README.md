@@ -66,6 +66,13 @@ import { RustDeskError, DEFAULT_ASSET_BASE_URL } from 'rustdesk-web-react/core';
   secretbox；18s 时限，默认 fail-closed，`allowInsecureFallback` 时按 v1 发送
   空 `PublicKey` 并返回降级原因。错误码区分 server key 缺失/无效、peer 签名
   无效、id 不匹配、密钥长度；mock peer 双向加密验证见 `tests/secure.test.ts`。
+- `src/protocol/connection.ts`：hbbs → hbbr 连接状态机——`PunchHoleRequest`
+  （`nat_type=SYMMETRIC`）→ `RelayResponse`（校验 `refuse_reason`、版本、uuid、
+  ID/offline/licence 失败枚举）→ 关闭 hbbs → 打开 hbbr（`relay_server` +2，
+  回退 hbbs +3）→ `RequestRelay` → 安全握手。支持 12s 响应超时、`AbortSignal`
+  取消；返回对象封装 `sendMessage`/`nextMessage`（后者把
+  `Misc.close_reason` 映射为 `peer-closed`）和 `close()`。mock hbbs+hbbr 真实
+  配对/转发测试见 `tests/connection.test.ts`。
 
 ## 开发
 

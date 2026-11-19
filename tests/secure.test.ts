@@ -258,6 +258,13 @@ describe('secure handshake', () => {
     });
   });
 
+  it('reports a pre-handshake close_reason as peer-closed', async () => {
+    await withPeer(async (sock, peer) => {
+      peer.send(encodeMessage({ misc: { close_reason: 'go away' } }));
+      await expectHandshakeError(sock, validOptions(), 'peer-closed');
+    });
+  });
+
   it('times out the securing phase with handshake-timeout', async () => {
     await withPeer(async (sock) => {
       await expectHandshakeError(
