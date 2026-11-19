@@ -39,8 +39,14 @@ export interface RustDeskSessionConfig {
   assetBaseUrl?: string;
   /** Capture quality hint; defaults to `balanced`. */
   imageQuality?: ImageQuality;
-  /** Do not send mouse/keyboard/clipboard input to the peer. */
+  /**
+   * View-only mode (P3-6): do not send mouse/keyboard/touch/clipboard input
+   * and do not apply the remote clipboard locally. Hosts should also hide or
+   * disable input controls when this is set.
+   */
   readOnly?: boolean;
+  /** Disable clipboard sync in both directions (mouse/keyboard stay on). */
+  disableClipboard?: boolean;
   /**
    * When true, a peer that cannot complete the signed handshake falls back to
    * an unencrypted session (v1 behaviour). Defaults to false (fail closed).

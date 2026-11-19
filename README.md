@@ -403,6 +403,56 @@ npm run dev          # demo，http://localhost:5173
   同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按规则未重复发通知；
   P3-5 暂不勾选。
 
+## 权限与只读（P3-6，已完成）
+
+- `src/session/permissions.ts` 的 `SessionPermissions` 把本地配置与对端
+  `Misc.permission_info` 合成一个 `InputPolicy`：
+
+  | 来源 | mouse | keyboard | touch | ime | clipboardSend | clipboardReceive |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 默认 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+  | `readOnly`（viewOnly） | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+  | `disableClipboard` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |
+  | 对端 keyboard=false | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+  | 对端 clipboard=false | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
+
+  上游 host 用 keyboard 权限统一 gate `MouseEvent`/`PointerDeviceEvent`/
+  `KeyEvent`/IME（`peer_keyboard_enabled`），所以撤销键盘权限时本地同时禁用
+  鼠标/触摸；`clipboardSend` 还要求 clipboard 权限（上游
+  `is_text_clipboard_required`）。`clipboardReceive` 只受本地
+  `readOnly`/`disableClipboard` 控制（上游行为；对端撤销后不会继续发送）。
+  `readOnly` 是任务中 `viewOnly` 的公开名称（组件 prop/配置），不新增第二个
+  开关。
+- `bind({mouse, keyboard, touch, ime, clipboard})` 在控制器创建后调用一次：
+  立即应用当前策略，并在每次变化时重新应用，避免 P4-1/P4-3 忘记初始门控。
+  禁用会释放已按下的键/鼠标按钮、取消触摸手势、清空 IME 组合并关闭剪贴板
+  对应方向，因此撤销后不会再发送输入。`applyInputPolicy(policy, targets)`
+  仍可单独使用。
+- `handleMessage(message)` 消费 `misc.permission_info`：登录期间由
+  `LoginFlow.onPermission` 回调到 `apply`（初始快照，不作为错误）；登录后由
+  P4-1 的循环喂入，keyboard/clipboard 从 true 变为 false 时通过 `onError`
+  报 `no-permission`。若对应输入已被本地 `readOnly`/`disableClipboard` 禁用，
+  则不报错（避免只读用户收到噪音）；未知枚举忽略。回调异常安全。
+- P4-1 接线：在 login 前创建 `SessionPermissions`，把 `apply` 传给
+  `LoginFlowOptions.onPermission`；登录后先处理 `takePendingMessages()`，再把
+  每条新消息交给 `handleMessage`；控制器创建后 `bind()`，并把
+  policy/permission 事件暴露给 P4-3。P4-3 用 `labels.readOnly` 显示只读状态
+  并禁用不可用的按钮（键盘、剪贴板；CtrlAltDel 另受 `sas_enabled` 限制）。
+- 注意：上游 view-only 还会在登录请求/`Misc.option` 中发送
+  `disable_keyboard=Yes`、`disable_clipboard=Yes`、`show_remote_cursor=Yes`
+  让 host 侧同步门控；当前只做本地门控，`disable_clipboard` 可在 P4-1 补上，
+  `disable_keyboard` 字段未在 vendored codec 中生成。本地门控已保证“不发送”，
+  所以不影响本任务验收。
+- 验证：`tests/permissions.test.ts`（16 项：默认/登录时 keyboard、clipboard
+  快照不报错/audio、file/去重与恢复/readOnly/disableClipboard/登录后撤销
+  报错一次/本地禁用时抑制通知/未知消息/初始状态/`bind`/dispose/回调异常/
+  `applyInputPolicy` 全目标）、`tests/permissions-integration.test.ts`（真实
+  mock hbbs/hbbr/peer 加密链路撤销 keyboard：释放已按下的按键与鼠标按钮、
+  后续按键/鼠标不发送、剪贴板发送被阻止；恢复后重新发送；readOnly 释放
+  输入并阻止键盘/鼠标/剪贴板，恢复后重新发送）。
+- 无需真机：permission_info 是协议消息，mock 黑盒已覆盖；真实对端撤销留待
+  P5-5 最终验收。
+
 ## 本机 Docker 真连环境（P1-9）
 
 不依赖用户现有服务器/客户端，也不使用用户已安装的 RustDesk 配置：

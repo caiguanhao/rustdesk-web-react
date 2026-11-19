@@ -24,6 +24,10 @@ import { challengeResponse } from '../crypto/password.js';
 import { RustDeskError } from '../session/errors.js';
 import type { ImageQuality } from '../session/options.js';
 import { clampDisplayIndex, type PeerInfo } from '../session/peer-info.js';
+import {
+  permissionNameFromWire,
+  type PermissionChange,
+} from '../session/permissions.js';
 import type { RustDeskStatusEvent } from '../session/state.js';
 
 export const DEFAULT_LOGIN_TIMEOUT_MS = 60_000;
@@ -35,13 +39,6 @@ export const WEB_CLIENT_VERSION = '1.3.7';
 
 /** Structural subset of P1-6's RelayConnection (easy to fake in tests). */
 export type LoginChannel = Pick<RelayConnection, 'sendMessage' | 'nextMessage'>;
-
-export type PermissionName = 'keyboard' | 'clipboard' | 'audio' | 'file';
-
-export interface PermissionChange {
-  permission: PermissionName;
-  enabled: boolean;
-}
 
 export interface LoginFlowOptions {
   peerId: string;
@@ -64,13 +61,6 @@ const IMAGE_QUALITY: Record<ImageQuality, message.ImageQuality> = {
   low: message.ImageQuality.Low,
   balanced: message.ImageQuality.Balanced,
   best: message.ImageQuality.Best,
-};
-
-const PERMISSION_NAMES: Record<number, PermissionName> = {
-  [message.PermissionInfo_Permission.Keyboard]: 'keyboard',
-  [message.PermissionInfo_Permission.Clipboard]: 'clipboard',
-  [message.PermissionInfo_Permission.Audio]: 'audio',
-  [message.PermissionInfo_Permission.File]: 'file',
 };
 
 /** Map RustDesk's login error strings to stable public error codes. */
@@ -270,7 +260,7 @@ export class LoginFlow {
   }
 
   private handlePermission(info: message.PermissionInfo): void {
-    const permission = PERMISSION_NAMES[info.permission];
+    const permission = permissionNameFromWire(info.permission);
     if (!permission) return;
     try {
       this.options.onPermission?.({ permission, enabled: info.enabled });

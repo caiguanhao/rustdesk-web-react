@@ -6,8 +6,8 @@ import {
   LoginFlow,
   WEB_CLIENT_VERSION,
   type LoginFlowOptions,
-  type PermissionChange,
 } from '../src/protocol/login';
+import type { PermissionChange } from '../src/session/permissions';
 import * as message from '../src/protocol/message';
 import type { DeepPartial } from '../src/protocol/message';
 import { WebSock, type WebSocketLike } from '../src/protocol/websock';

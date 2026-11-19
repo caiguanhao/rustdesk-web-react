@@ -274,6 +274,15 @@ export class MockRustDeskServer {
     this.peerSend({ clipboard: message.Clipboard.fromPartial(clipboard) });
   }
 
+  /** Send a post-login permission change from the controlled peer. */
+  sendPermissionInfo(
+    permission: message.PermissionInfo_Permission,
+    enabled: boolean,
+  ): void {
+    if (!this.peerSend) throw new Error('mock peer is not logged in yet');
+    this.peerSend({ misc: { permission_info: { permission, enabled } } });
+  }
+
   async close(): Promise<void> {
     for (const timer of this.pairingTimers.values()) clearTimeout(timer);
     for (const timer of this.idleTimers) clearTimeout(timer);
