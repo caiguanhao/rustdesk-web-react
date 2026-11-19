@@ -10,6 +10,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 .temp/
+
+# 私密配置（用户本机创建，可能含密码，绝不提交）
 demo/.env.local
 
 # Node modules (if using Node.js projects)
@@ -27,4 +29,7 @@ target/
 .idea/
 *.swp
 *.swo
+
+# 本机 Claude 配置（可含机器相关的绝对路径）
+.claude/settings.local.json
 
