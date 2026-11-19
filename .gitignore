@@ -21,6 +21,9 @@ node_modules/
 dist/
 coverage/
 
+# Demo copies of decoder assets (source of truth: assets/ogv/, `npm run copy-assets`)
+demo/public/rustdesk-assets/
+
 # Python cache (if using Python projects)
 __pycache__/
 *.pyc

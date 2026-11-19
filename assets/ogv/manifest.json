@@ -1,0 +1,68 @@
+{
+  "name": "ogv",
+  "version": "1.8.6",
+  "description": "VP9 decoder runtime from ogv.js. Only the worker-based VP9 files (SIMD + non-SIMD) are vendored; no demuxers, audio or other codecs.",
+  "source": "https://github.com/brion/ogv.js/releases/tag/v1.8.6",
+  "copiedFrom": "rustdesk-web-v1 branch (ogvjs-1.8.6/) of the rustdesk-web reference checkout",
+  "copiedOn": "2026-11-20",
+  "licenses": {
+    "ogv.js wrapper": "MIT (see COPYING)",
+    "libvpx decoder": "BSD-3-Clause (see LICENSE-vpx.txt) plus patent grant (see PATENTS-vpx.txt)"
+  },
+  "files": [
+    {
+      "name": "ogv.js",
+      "role": "loader",
+      "bytes": 124661,
+      "sha256": "db41dcdb05a8f8d3467ac6265a8826ad9d7a148c13a1ea688293ea614b2878d2"
+    },
+    {
+      "name": "ogv-worker-video.js",
+      "role": "worker",
+      "bytes": 9727,
+      "sha256": "de157b25d2c2455e67b93f660c312c1c870c86bf8b71a26735f0fd7c87de574a"
+    },
+    {
+      "name": "ogv-decoder-video-vp9-wasm.js",
+      "role": "decoder-js",
+      "bytes": 10494,
+      "sha256": "1cc5f87b0f6209237dcda30d0fe742f1492182ed9982e20a97f1505deecd8e5d"
+    },
+    {
+      "name": "ogv-decoder-video-vp9-wasm.wasm",
+      "role": "decoder-wasm",
+      "bytes": 241857,
+      "sha256": "cbaa620aef56a4f328da918c7a3c9a62d0ff6df7923e6002ef2331b3d7ac2b82"
+    },
+    {
+      "name": "ogv-decoder-video-vp9-simd-wasm.js",
+      "role": "decoder-js",
+      "bytes": 10543,
+      "sha256": "e30159370b15c1e793cb3f29b3c194150a4e75890430f0a8a7a6642a9a752fe7"
+    },
+    {
+      "name": "ogv-decoder-video-vp9-simd-wasm.wasm",
+      "role": "decoder-wasm",
+      "bytes": 260523,
+      "sha256": "89bef7b2a0b910e1fe460349499ef879ba55e279640652e9c3d51596d9785bad"
+    },
+    {
+      "name": "COPYING",
+      "role": "license",
+      "bytes": 1116,
+      "sha256": "e76a008244ac79d0a2fd265e7d878d7ff66ee45c26ada8d3c0178ec58f610cbd"
+    },
+    {
+      "name": "LICENSE-vpx.txt",
+      "role": "license",
+      "bytes": 1537,
+      "sha256": "8267348d5af1262c11d1a08de2f5afc77457755f1ac658627dd9acf71011d615"
+    },
+    {
+      "name": "PATENTS-vpx.txt",
+      "role": "license",
+      "bytes": 1436,
+      "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c"
+    }
+  ]
+}
