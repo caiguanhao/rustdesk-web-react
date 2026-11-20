@@ -272,20 +272,69 @@ describe('RustDeskViewer', () => {
       .spyOn(KeyboardInput.prototype, 'sendCtrlAltDel')
       .mockImplementation(() => {});
     const disconnect = vi.mocked(RustDeskSession.prototype.disconnect);
-    renderViewer({ autoConnect: true });
+    // Secure-context browsers expose navigator.clipboard; the toolbar then
+    // reads it directly instead of opening the HTTP paste prompt.
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText: vi.fn(async () => 'local'),
+        writeText: vi.fn(async () => undefined),
+      },
+    });
+    try {
+      renderViewer({ autoConnect: true });
 
-    await connected('Ctrl+Alt+Del');
-    fireEvent.click(button('Ctrl+Alt+Del'));
-    expect(ctrlAltDel).toHaveBeenCalledTimes(1);
+      await connected('Ctrl+Alt+Del');
+      fireEvent.click(button('Ctrl+Alt+Del'));
+      expect(ctrlAltDel).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(button('Keyboard'));
-    expect(focusIme).toHaveBeenCalledTimes(1);
+      fireEvent.click(button('Keyboard'));
+      expect(focusIme).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(button('Clipboard'));
-    await waitFor(() => expect(sendLocal).toHaveBeenCalledTimes(1));
+      fireEvent.click(button('Clipboard'));
+      await waitFor(() => expect(sendLocal).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(button('Disconnect'));
-    expect(disconnect).toHaveBeenCalledTimes(1);
+      fireEvent.click(button('Disconnect'));
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>).clipboard;
+    }
+  });
+
+  it('opens a paste prompt when the Clipboard API is unavailable (HTTP)', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined,
+    });
+    const sendText = vi
+      .spyOn(RustDeskSession.prototype, 'sendText')
+      .mockReturnValue(true);
+    const sendLocal = vi
+      .spyOn(RustDeskSession.prototype, 'sendLocalClipboard')
+      .mockResolvedValue(false);
+    try {
+      renderViewer({ autoConnect: true });
+      await connected('Clipboard');
+
+      fireEvent.click(button('Clipboard'));
+      expect(sendLocal).not.toHaveBeenCalled();
+
+      const field = await screen.findByLabelText(
+        'Paste the text to send to the remote clipboard',
+      );
+      fireEvent.change(field, { target: { value: '本地文本' } });
+      fireEvent.click(button('Send'));
+      await waitFor(() => expect(sendText).toHaveBeenCalledWith('本地文本'));
+      await waitFor(() =>
+        expect(
+          screen.queryByLabelText(
+            'Paste the text to send to the remote clipboard',
+          ),
+        ).toBeNull(),
+      );
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>).clipboard;
+    }
   });
 
   it('disables input controls and shows the badge in read-only mode', async () => {

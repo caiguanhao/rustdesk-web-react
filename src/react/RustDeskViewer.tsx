@@ -62,6 +62,10 @@ export interface RustDeskViewerLabels {
   keyboard: string;
   clipboard: string;
   paste: string;
+  /** Shown when the Clipboard API is unavailable (plain-HTTP pages). */
+  pastePrompt: string;
+  /** Submit label for the paste prompt. */
+  send: string;
   copy: string;
   ctrlAltDel: string;
   passwordPrompt: string;
@@ -83,6 +87,8 @@ const DEFAULT_LABELS: RustDeskViewerLabels = {
   keyboard: 'Keyboard',
   clipboard: 'Clipboard',
   paste: 'Paste',
+  pastePrompt: 'Paste the text to send to the remote clipboard',
+  send: 'Send',
   copy: 'Copy',
   ctrlAltDel: 'Ctrl+Alt+Del',
   passwordPrompt: 'Enter the remote device password',
@@ -95,6 +101,14 @@ const DEFAULT_LABELS: RustDeskViewerLabels = {
   disconnected: 'Disconnected',
   readOnly: 'View only',
 };
+
+/** `navigator.clipboard` only exists in secure contexts (HTTPS/localhost). */
+function canReadBrowserClipboard(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.clipboard?.readText === 'function'
+  );
+}
 
 export interface PasswordPrompt {
   /** True when the peer rejected a previously supplied password. */
@@ -190,6 +204,13 @@ const INPUT_STYLE: CSSProperties = {
   color: '#fff',
   // At least 16px keeps iOS Safari from zooming the page on focus.
   fontSize: 16,
+};
+
+const TEXTAREA_STYLE: CSSProperties = {
+  ...INPUT_STYLE,
+  minHeight: 96,
+  resize: 'vertical',
+  fontFamily: 'inherit',
 };
 
 const BUTTON_STYLE: CSSProperties = {
@@ -312,6 +333,8 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
     const [passwordInput, setPasswordInput] = useState('');
     const [clipboardNotice, setClipboardNotice] =
       useState<RemoteClipboardEvent | null>(null);
+    const [pasteOpen, setPasteOpen] = useState(false);
+    const [pasteText, setPasteText] = useState('');
     const [notice, setNotice] = useState<string | null>(null);
     const [fullscreen, setFullscreen] = useState(false);
     const [fullscreenSupported, setFullscreenSupported] = useState(false);
@@ -324,6 +347,7 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
     const touchRef = useRef<TouchInput | null>(null);
     const imeRef = useRef<ImeInput | null>(null);
     const passwordId = useId();
+    const pasteId = useId();
 
     const {
       session,
@@ -340,9 +364,15 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
       onStatusChange: (event) => propsRef.current.onStatusChange?.(event),
       onError: (value) => {
         propsRef.current.onError?.(value);
-        // Non-fatal notices (P3-6 revokes, security downgrade) do not change
-        // the status; surface the peer's explanation above the video.
-        if (value.code === 'no-permission') setNotice(value.message);
+        // Non-fatal notices (P3-6 revokes, security downgrade, a denied
+        // clipboard gesture) do not change the status; surface them above
+        // the video.
+        if (
+          value.code === 'no-permission' ||
+          value.code === 'clipboard-unavailable'
+        ) {
+          setNotice(value.message);
+        }
       },
       onClipboard: (event) => {
         // A successful auto-copy clears a stale manual-copy prompt.
@@ -360,6 +390,11 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
       const timer = setTimeout(() => setNotice(null), 6_000);
       return () => clearTimeout(timer);
     }, [notice]);
+
+    // A disconnect/retry must not leave the paste prompt over the status UI.
+    useEffect(() => {
+      if (status !== 'connected') setPasteOpen(false);
+    }, [status]);
 
     // Pinch zoom is a high-frequency gesture; write the transform directly
     // instead of routing each pointermove through a React render.
@@ -606,7 +641,32 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
     };
 
     const pasteRemote = (): void => {
-      void session?.sendLocalClipboard().catch(() => false);
+      // Plain-HTTP pages have no `navigator.clipboard` (not a secure
+      // context), so reading silently fails. Offer a visible textarea where
+      // the user can long-press/paste instead.
+      if (!canReadBrowserClipboard()) {
+        setPasteText('');
+        setPasteOpen(true);
+        return;
+      }
+      // A denied permission or an empty clipboard also lands here; the
+      // prompt is a harmless manual fallback in both cases.
+      void session
+        ?.sendLocalClipboard()
+        .then((sent) => {
+          if (sent) return;
+          setPasteText('');
+          setPasteOpen(true);
+        })
+        .catch(() => false);
+    };
+
+    const submitPaste = (event: FormEvent<HTMLFormElement>): void => {
+      event.preventDefault();
+      if (pasteText.length === 0) return;
+      session?.sendText(pasteText);
+      setPasteText('');
+      setPasteOpen(false);
     };
 
     const policy = permission?.policy;
@@ -692,6 +752,39 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
                 disabled={passwordInput.length === 0}
               >
                 {labels.submit}
+              </button>
+            </div>
+          </form>
+        </div>
+      );
+    } else if (pasteOpen && status === 'connected') {
+      overlay = (
+        <div style={OVERLAY_STYLE} data-rustdesk-overlay="paste">
+          <form style={PANEL_STYLE} onSubmit={submitPaste}>
+            <label htmlFor={pasteId}>{labels.pastePrompt}</label>
+            <textarea
+              id={pasteId}
+              autoFocus
+              rows={4}
+              style={TEXTAREA_STYLE}
+              placeholder={labels.paste}
+              value={pasteText}
+              onChange={(event) => setPasteText(event.target.value)}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                style={BUTTON_STYLE}
+                onClick={() => setPasteOpen(false)}
+              >
+                {labels.cancel}
+              </button>
+              <button
+                type="submit"
+                style={BUTTON_STYLE}
+                disabled={pasteText.length === 0}
+              >
+                {labels.send}
               </button>
             </div>
           </form>

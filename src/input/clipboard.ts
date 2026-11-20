@@ -99,6 +99,75 @@ export interface ClipboardControllerOptions {
 
 export const DEFAULT_MAX_CLIPBOARD_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Write text through `document.execCommand('copy')`.
+ *
+ * `navigator.clipboard` only exists in secure contexts, so a plain-HTTP LAN
+ * page (common for real-device testing and self-hosted setups) cannot use it
+ * at all. `execCommand` still works there from a user gesture. The caller
+ * must invoke this synchronously from a click/paste handler; browsers reject
+ * it otherwise. Returns false when the DOM/command is unavailable or the
+ * copy is rejected.
+ */
+function writeViaExecCommand(text: string): boolean {
+  if (
+    typeof document === 'undefined' ||
+    typeof document.execCommand !== 'function' ||
+    !document.body
+  ) {
+    return false;
+  }
+  const active =
+    typeof HTMLElement !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const selection =
+    typeof document.getSelection === 'function' ? document.getSelection() : null;
+  const savedRanges: Range[] = [];
+  if (selection) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      savedRanges.push(selection.getRangeAt(index));
+    }
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.setAttribute('aria-hidden', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  textarea.style.fontSize = '16px';
+  document.body.appendChild(textarea);
+
+  let copied = false;
+  try {
+    textarea.focus();
+    textarea.select();
+    // iOS Safari needs the explicit range before execCommand('copy').
+    textarea.setSelectionRange(0, text.length);
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  } finally {
+    textarea.parentNode?.removeChild(textarea);
+    if (selection) {
+      selection.removeAllRanges();
+      for (const range of savedRanges) selection.addRange(range);
+    }
+    try {
+      active?.focus({ preventScroll: true });
+    } catch {
+      // Focus restoration is best-effort.
+    }
+  }
+  return copied;
+}
+
 const utf8 = new TextEncoder();
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
 const ZSTD_MAGIC = 0xfd2fb528;
@@ -485,24 +554,22 @@ export class ClipboardController {
     reportError: boolean,
   ): Promise<boolean> {
     const clipboard = this.browserClipboard();
-    if (!clipboard?.writeText) {
-      if (reportError) {
-        this.reportClipboardUnavailable('Cannot write the browser clipboard');
+    if (clipboard?.writeText) {
+      try {
+        await clipboard.writeText(text);
+        return true;
+      } catch {
+        // Insecure contexts and denied permissions: try the legacy command.
+        // An injected adapter stays authoritative (tests/headless hosts).
       }
-      return false;
     }
-    try {
-      await clipboard.writeText(text);
+    if (this.injectedClipboard === undefined && writeViaExecCommand(text)) {
       return true;
-    } catch (cause) {
-      if (reportError) {
-        this.reportClipboardUnavailable(
-          'Cannot write the browser clipboard',
-          cause,
-        );
-      }
-      return false;
     }
+    if (reportError) {
+      this.reportClipboardUnavailable('Cannot write the browser clipboard');
+    }
+    return false;
   }
 
   private reportClipboardUnavailable(message: string, cause?: unknown): void {
