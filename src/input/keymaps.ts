@@ -255,18 +255,25 @@ export interface DomKeyEncodingOptions extends KeyCodeOptions {
   down: boolean;
 }
 
-/** Encode one DOM key event in Map mode; null for unknown code. */
+/**
+ * Encode one DOM key event in Map mode; null for unknown code.
+ *
+ * `code` defaults to `event.code`; soft keyboards (notably Android IMEs) can
+ * send a control key with an empty `code`, in which case the caller passes the
+ * `event.key`-derived code instead.
+ */
 export function mapDomKey(
   event: Pick<KeyboardEvent, 'code'> & ModifierStateSource,
   options: DomKeyEncodingOptions,
+  code: string = event.code,
 ): KeyEvent | null {
-  const chr = keycodeFor(options.platform, event.code, options);
+  const chr = keycodeFor(options.platform, code, options);
   if (chr === undefined) return null;
   return {
     down: options.down,
     press: false,
     chr,
-    modifiers: lockModifiersFor(event.code, event),
+    modifiers: lockModifiersFor(code, event),
     mode: KeyboardMode.Map,
   };
 }

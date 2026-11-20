@@ -51,6 +51,43 @@ function isComposing(event: KeyboardEvent): boolean {
   return event.isComposing || event.keyCode === 229 || event.key === 'Process';
 }
 
+/**
+ * Control keys that Android soft keyboards (SwiftKey et al.) send with an
+ * empty `code` and only a legacy `key` name. Printable keys are deliberately
+ * absent: composition text is owned by P3-3 (`seq`), and mapping letters here
+ * would duplicate it as physical keycodes.
+ */
+const KEY_CODE_FALLBACK: Readonly<Record<string, string>> = {
+  Backspace: 'Backspace',
+  Delete: 'Delete',
+  Enter: 'Enter',
+  Tab: 'Tab',
+  Escape: 'Escape',
+  Insert: 'Insert',
+  Home: 'Home',
+  End: 'End',
+  PageUp: 'PageUp',
+  PageDown: 'PageDown',
+  ArrowUp: 'ArrowUp',
+  ArrowDown: 'ArrowDown',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+};
+
+interface ResolvedKey {
+  code: string;
+  /** True when `code` came from event.key rather than event.code. */
+  fallback: boolean;
+}
+
+function resolveKey(event: KeyboardEvent): ResolvedKey | null {
+  if (event.code && event.code !== 'Unidentified') {
+    return { code: event.code, fallback: false };
+  }
+  const code = KEY_CODE_FALLBACK[event.key];
+  return code ? { code, fallback: true } : null;
+}
+
 export class KeyboardInput {
   private readonly channel: KeyboardChannel;
   private readonly targetOption?: EventTarget;
@@ -171,42 +208,60 @@ export class KeyboardInput {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.enabledValue || isComposing(event) || !this.platform) return;
-    if (!event.code || event.code === 'Unidentified') return;
+    if (!this.enabledValue || !this.platform) return;
+    const resolved = resolveKey(event);
+    if (!resolved) return;
+    // keyCode 229 marks IME processing. The key-derived control keys are the
+    // exception: Android IMEs report 229 for Backspace even when no
+    // composition is active, and there is no other way to receive it.
+    if (isComposing(event) && !resolved.fallback) return;
     if (this.preventDefaultValue) event.preventDefault();
 
-    const encoded = mapDomKey(event, {
-      platform: this.platform,
-      down: true,
-      swapControlCommand: this.swapControlCommand,
-      macIsoLayout: this.macIsoLayout,
-    });
+    const encoded = mapDomKey(
+      event,
+      {
+        platform: this.platform,
+        down: true,
+        swapControlCommand: this.swapControlCommand,
+        macIsoLayout: this.macIsoLayout,
+      },
+      resolved.code,
+    );
     if (!encoded) return;
-    this.held.set(event.code, encoded);
+    this.held.set(resolved.code, encoded);
     this.send(encoded);
   };
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
-    if (!this.enabledValue || isComposing(event)) return;
-    const held = this.held.get(event.code);
-    this.held.delete(event.code);
+    if (!this.enabledValue) return;
+    const resolved = resolveKey(event);
+    if (!resolved) return;
+    const held = this.held.get(resolved.code);
+    // A key we actually pressed must always be released, even if the IME
+    // marks its keyup as composing.
+    if (!held && isComposing(event) && !resolved.fallback) return;
+    this.held.delete(resolved.code);
     if (held) {
       // Reuse the key-down chr so a platform change cannot release a
       // different key; refresh lock hints from the current browser state.
       this.send({
         ...held,
         down: false,
-        modifiers: lockModifiersFor(event.code, event),
+        modifiers: lockModifiersFor(resolved.code, event),
       });
       return;
     }
     if (!this.platform) return;
-    const encoded = mapDomKey(event, {
-      platform: this.platform,
-      down: false,
-      swapControlCommand: this.swapControlCommand,
-      macIsoLayout: this.macIsoLayout,
-    });
+    const encoded = mapDomKey(
+      event,
+      {
+        platform: this.platform,
+        down: false,
+        swapControlCommand: this.swapControlCommand,
+        macIsoLayout: this.macIsoLayout,
+      },
+      resolved.code,
+    );
     if (encoded) this.send(encoded);
   };
 

@@ -165,6 +165,48 @@ describe('KeyboardInput', () => {
     expect(channel.sent).toEqual([]);
   });
 
+  it('delivers soft-keyboard control keys that have no DOM code', () => {
+    const { input, channel } = makeInput();
+    input.attach();
+    const down = dispatchKey('keydown', {
+      code: '',
+      key: 'Backspace',
+      keyCode: 8,
+    });
+    const up = dispatchKey('keyup', {
+      code: '',
+      key: 'Backspace',
+      keyCode: 8,
+    });
+    expect(down.defaultPrevented).toBe(true);
+    expect(up.defaultPrevented).toBe(false);
+    expect(channel.sent).toEqual([
+      {
+        down: true,
+        press: false,
+        chr: 14,
+        modifiers: [],
+        mode: KeyboardMode.Map,
+      },
+      {
+        down: false,
+        press: false,
+        chr: 14,
+        modifiers: [],
+        mode: KeyboardMode.Map,
+      },
+    ]);
+
+    // 229 without a known control-key name remains IME input, not a key.
+    const unknown = dispatchKey('keydown', {
+      code: '',
+      key: 'Unidentified',
+      keyCode: 229,
+    });
+    expect(unknown.defaultPrevented).toBe(false);
+    expect(channel.sent).toHaveLength(2);
+  });
+
   it('respects the preventDefault policy', () => {
     const { input } = makeInput({ preventDefault: false });
     input.attach();

@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>IME event log — rustdesk-web-react</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font: 14px/1.4 system-ui, -apple-system, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        background: #111;
+        color: #eee;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+      p {
+        margin: 0 0 12px;
+        color: #aaa;
+      }
+      fieldset {
+        border: 1px solid #444;
+        border-radius: 6px;
+        margin: 0 0 12px;
+        padding: 10px;
+      }
+      legend {
+        padding: 0 4px;
+        color: #ccc;
+      }
+      textarea,
+      input,
+      button {
+        font: inherit;
+      }
+      #visible {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 64px;
+        padding: 8px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background: #000;
+        color: #fff;
+        font-size: 16px;
+      }
+      #hidden {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        padding: 0;
+        border: 0;
+        margin: 0;
+        overflow: hidden;
+        font-size: 16px;
+      }
+      #log {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 240px;
+        padding: 8px;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: #000;
+        color: #9f9;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 8px 0 0;
+      }
+      button {
+        padding: 6px 10px;
+        border: 1px solid #666;
+        border-radius: 4px;
+        background: #222;
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>IME event log</h1>
+    <p>
+      Focus the hidden textarea, type Chinese with the real IME, then press
+      Backspace. The log records the exact event sequence. Nothing is sent to a
+      server.
+    </p>
+
+    <fieldset>
+      <legend>Hidden textarea (same shape as the library)</legend>
+      <div class="row">
+        <button id="focus-hidden" type="button">
+          Focus hidden textarea
+        </button>
+        <label>
+          <input id="mimic" type="checkbox" checked />
+          mimic library clearing/seq behavior
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Visible textarea (comparison)</legend>
+      <textarea
+        id="visible"
+        rows="2"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="Tap here and type"
+      ></textarea>
+    </fieldset>
+
+    <textarea
+      id="hidden"
+      tabindex="-1"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      spellcheck="false"
+    ></textarea>
+
+    <div class="row">
+      <button id="copy" type="button">Copy log</button>
+      <button id="clear" type="button">Clear</button>
+    </div>
+    <pre id="log" aria-live="polite"></pre>
+
+    <script>
+      (() => {
+        const logEl = document.getElementById('log');
+        const hidden = document.getElementById('hidden');
+        const visible = document.getElementById('visible');
+        const mimic = document.getElementById('mimic');
+        const events = [
+          'focus',
+          'blur',
+          'keydown',
+          'keyup',
+          'beforeinput',
+          'input',
+          'compositionstart',
+          'compositionupdate',
+          'compositionend',
+          'paste',
+        ];
+        let sent = '';
+
+        const append = (entry) => {
+          logEl.textContent += JSON.stringify(entry) + '\n';
+          logEl.scrollTop = logEl.scrollHeight;
+        };
+
+        const describe = (field, event) => {
+          const e = event;
+          return {
+            t: new Date().toISOString().slice(11, 23),
+            field,
+            type: e.type,
+            key: e.key,
+            code: e.code,
+            keyCode: e.keyCode,
+            which: e.which,
+            isComposing: e.isComposing,
+            inputType: e.inputType,
+            data: e.data,
+            composition: e.data,
+            value: field === 'hidden' ? hidden.value : visible.value,
+            sel: [e.target?.selectionStart, e.target?.selectionEnd],
+          };
+        };
+
+        const attach = (element, name) => {
+          for (const type of events) {
+            element.addEventListener(type, (event) => {
+              append(describe(name, event));
+              if (!mimic.checked) return;
+              // Mirror ImeInput: ignore composing input, clear after commit.
+              const input = event;
+              if (
+                type === 'input' &&
+                !input.isComposing &&
+                input.isComposing !== undefined
+              ) {
+                sent += input.data || element.value || '';
+                element.value = '';
+              } else if (type === 'compositionend') {
+                sent += input.data || element.value || '';
+                element.value = '';
+              }
+            });
+          }
+        };
+
+        attach(hidden, 'hidden');
+        attach(visible, 'visible');
+
+        document.getElementById('focus-hidden').addEventListener('click', () => {
+          try {
+            hidden.focus({ preventScroll: true });
+          } catch {
+            hidden.focus();
+          }
+          append({
+            t: new Date().toISOString().slice(11, 23),
+            field: 'hidden',
+            type: 'manual-focus',
+            active: document.activeElement === hidden,
+          });
+        });
+
+        document.getElementById('clear').addEventListener('click', () => {
+          logEl.textContent = '';
+          sent = '';
+        });
+
+        document.getElementById('copy').addEventListener('click', () => {
+          const text = logEl.textContent || '';
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.style.position = 'fixed';
+          area.style.top = '0';
+          area.style.left = '0';
+          area.style.width = '1px';
+          area.style.height = '1px';
+          area.style.opacity = '0';
+          document.body.appendChild(area);
+          area.focus();
+          area.select();
+          let copied = false;
+          try {
+            copied = document.execCommand('copy');
+          } catch {
+            copied = false;
+          }
+          area.remove();
+          if (!copied && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+          append({
+            t: new Date().toISOString().slice(11, 23),
+            field: 'log',
+            type: 'copy',
+            copied,
+            bytes: text.length,
+          });
+        });
+
+        append({
+          t: new Date().toISOString().slice(11, 23),
+          field: 'page',
+          type: 'ready',
+          userAgent: navigator.userAgent,
+        });
+      })();
+    </script>
+  </body>
+</html>

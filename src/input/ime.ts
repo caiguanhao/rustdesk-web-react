@@ -201,7 +201,22 @@ export class ImeInput {
     if (!this.enabledValue) return;
     const input = event as InputEvent;
     if (this.composing || input.isComposing || this.suppressInput) return;
-    const text = input.data || this.element?.value || '';
+    const type = input.inputType;
+    if (type === 'deleteContentBackward' || type === 'deleteContentForward') {
+      // SwiftKey edits its hidden field and fires only this event for a
+      // deletion (data: null, value: the remaining text). The keydown is
+      // owned by KeyboardInput; resending the remaining value here would
+      // duplicate or corrupt the remote text.
+      if (this.element) this.element.value = '';
+      return;
+    }
+    if (type === 'insertLineBreak' || type === 'insertParagraph') {
+      // Enter is a control key; KeyboardInput sends it from the keydown.
+      if (this.element) this.element.value = '';
+      return;
+    }
+    // Some IMEs omit `data` but leave the inserted text in the field.
+    const text = input.data ?? this.element?.value ?? '';
     if (this.element) this.element.value = '';
     if (text) this.sendText(text);
   };

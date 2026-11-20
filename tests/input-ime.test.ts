@@ -119,6 +119,40 @@ describe('ImeInput', () => {
     expect(element.value).toBe('');
   });
 
+  it('ignores IME deletion input and never resends the remaining text', () => {
+    const { input, channel } = makeInput();
+    input.attach();
+    const element = document.querySelector('textarea')!;
+    input.focus();
+    element.value = '你';
+    element.dispatchEvent(
+      new InputEvent('input', {
+        data: null,
+        inputType: 'deleteContentBackward',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(channel.sent).toEqual([]);
+    expect(element.value).toBe('');
+  });
+
+  it('does not send line-break input as text', () => {
+    const { input, channel } = makeInput();
+    input.attach();
+    const element = document.querySelector('textarea')!;
+    input.focus();
+    element.dispatchEvent(
+      new InputEvent('input', {
+        data: null,
+        inputType: 'insertLineBreak',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(channel.sent).toEqual([]);
+  });
+
   it('sends one seq for a composition and suppresses the trailing input', () => {
     const { input, channel } = makeInput();
     input.attach();
