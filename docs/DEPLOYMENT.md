@@ -142,9 +142,11 @@ Caddy 自动处理 WebSocket 升级、HSTS 和证书；默认没有 read/write t
 - 浏览器设备必须能访问 **21118 和 21119**，不仅是 21116/21117；被控端仍需
   21116 TCP/UDP 与 21117。
 - **剪贴板**：`navigator.clipboard` 只在安全上下文（HTTPS 或
-  `localhost`/`127.0.0.1`）可用。纯 HTTP 局域网页面仍可看画面/输入，但自动复制
-  可能被浏览器拒绝；viewer 会显示手动 “Copy” 按钮（用户手势），本地→远端读取
-  剪贴板也需要权限/手势。生产或不可信网络请使用 HTTPS + WSS。
+  `localhost`/`127.0.0.1`）可用。纯 HTTP 局域网页面仍可看画面/输入；自动复制
+  会被拒绝，viewer 显示手动 “Copy” 按钮，并在点击手势中回退
+  `document.execCommand('copy')`；本地→远端不读取系统剪贴板（浏览器不允许），
+  而是打开粘贴框，用户长按粘贴后点 Send 发送。生产或不可信网络请使用
+  HTTPS + WSS。
 - 明文局域网会暴露页面与 rendezvous 报文（relay 载荷在安全握手后由应用层加密，
   但 rendezvous 本身不加密）。不要在不可信网络使用。
 - 使用本仓库的 Docker 环境跨机测试时（仅仓库 checkout；宿主请用现有

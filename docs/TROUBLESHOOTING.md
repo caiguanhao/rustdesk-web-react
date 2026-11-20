@@ -108,12 +108,21 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 
 - 桌面：先点击画面让 viewer 聚焦；键盘监听在 `document` 上，未聚焦不捕获。
   浏览器/OS 保留快捷键可能被拦截或无法发送。
-- iOS/Android：软键盘通过工具栏 Keyboard 按钮（用户手势）聚焦隐藏 textarea；
-  中文 IME/软键盘 Backspace/Enter 行为、双击/长按/双指手势、自动复制等仍需
-  真机验收。没有真机验证时不宣称通过。
+- iOS/Android（2026-11-20 真机通过：iOS 26.6.2 Safari、Android 15 Chrome
+  156）：软键盘通过工具栏 Keyboard 按钮（用户手势）聚焦隐藏 textarea；中文
+  IME、Backspace/Enter、双击/长按/双指手势、自动复制/手动复制均已验证。
+- Android 第三方 IME（如 Microsoft SwiftKey）可能不发 composition 事件，而是
+  用 `input{insertText}` 提交文本、用 `input{deleteContentBackward}` 删除；
+  库只对插入类 inputType 发送 `data`，删除/换行交给按键回退。若某 IME 仍异常，
+  用 `demo/ime-events.html` 抓事件序列。
+- iPhone Safari 对普通元素没有 Fullscreen API，viewer 用 CSS 固定定位铺满；
+  浏览器地址栏无法由网页隐藏。需要真正全屏时用“添加到主屏幕”/standalone 或
+  宿主 WKWebView。
 - 被控端是 Android 时，本库按桌面 peer 发送鼠标事件；Android 原生触摸协议
   （PointerDeviceEvent）未实现，MVP 目标是桌面被控端。
-- 剪贴板工具栏按钮是“本地→远端粘贴”；远端→本地自动复制失败时显示 Copy 按钮。
+- 剪贴板工具栏按钮是“本地→远端粘贴”；HTTPS 下读取系统剪贴板（需手势/权限），
+  纯 HTTP 下浏览器不提供 `navigator.clipboard`，按钮改为打开粘贴框；远端→本地
+  自动复制失败时显示 Copy 按钮，点击后用 `execCommand` 回退写入。
 
 ## 画面
 

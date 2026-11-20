@@ -67,7 +67,7 @@ Demo（仅仓库 checkout）：`npm run dev` 打开表单；`VITE_RD_*` 模板�
   （`src/index.ts`）和 `./core`（`src/core.ts`）。
 - `RustDeskViewer` 已可嵌入宿主 React 页面：canvas/letterbox、状态与密码
   覆盖层、错误重试、工具栏、输入/触摸/IME/剪贴板接线和 ref 命令均可用；
-  真实 iOS/Android 触摸/软键盘/剪贴板仍待 P3/P5 真机验收。
+  真实 iOS/Android 触摸/软键盘/剪贴板已通过真机验收。
 - 硬约束：仅 VP9、库内不使用 Flutter/CanvasKit/gstatic/FFmpeg WASM；最终验收只读连接用户现有 hbbs/client。
 
 ## API 入口
@@ -234,7 +234,8 @@ npm run dev          # demo，http://localhost:5173
   16:9/4:3/1:1/竖屏/裁剪显示尺寸、resize、0 尺寸、坐标边界、抛错仍释放、
   dispose 和全屏（标准/前缀/不支持/拒绝）。`npm run test:decoder` 额外
   用真实 VP9 帧验证 WebGL 像素回读 `(255,0,0,255)` 及两种容器比例下的
-  CSS letterbox 几何；真机全屏/旋转列入 P5-1/P5-2。
+  CSS letterbox 几何；真机全屏/旋转已在 P5-1/P5-2 验收（iPhone Safari 走
+  CSS 铺满回退，浏览器地址栏无法由网页隐藏）。
 
 ## 显示切换与分辨率（P2-4）
 
@@ -308,7 +309,7 @@ npm run dev          # demo，http://localhost:5173
   需要浏览器，故不在 `npm test` 中；`npm run test:decoder` 仍用轻量 CDP
   脚本验证两套 WASM 与 P2-3 渲染细节。真机触摸/输入测试仍属 P3/P5。
 
-## 鼠标输入（P3-1，⏳ 真机待验）
+## 鼠标输入（P3-1，已完成）
 
 - `src/input/mouse.ts` 的 `MouseInput` 把 DOM 鼠标事件编码成 RustDesk
   `MouseEvent`：低 3 位动作（move 0、down 1、up 2、wheel 3），按钮位左移 3
@@ -339,11 +340,10 @@ npm run dev          # demo，http://localhost:5173
   hbbs/hbbr/peer 加密链路）、`tests/e2e/input.spec.ts`（真实浏览器：
   letterbox/竖屏坐标、右键 contextmenu、滚轮且页面不滚动、拖出画布贴边、
   mask 序列）。`npm run test:canvas` 同时跑画布和鼠标测试。
-- ⏳ 真机待验：尚无 P4-1/P4-3 的会话/Viewer 输入接线，也没有获授权的真实
-  RustDesk 被控端，因此真实点击/拖动/滚轮方向未验证；已通过 通知并记录
-  在 plan。P3-1 暂不勾选。
+- 真机验收（2026-11-20）：iPhone/Android 连接用户现有 hbbs 与 macOS 被控端，
+  单击、拖动、长按右键、双指滚动方向均正确；P4-1/P4-3 接线已具备。
 
-## 键盘输入（P3-2，⏳ 真机待验）
+## 键盘输入（P3-2，已完成）
 
 - `src/input/keymaps.ts` 收录 DOM `KeyboardEvent.code` → 对端平台位置键码：
   Windows scancode（扩展键 `0xE0xx`）、Linux X11 keycode（evdev+8）、
@@ -358,8 +358,11 @@ npm run dev          # demo，http://localhost:5173
   CapsLock/NumLock 只作为可打印/小键盘键的 LED 同步提示（keyup 使用当前
   `getModifierState()`，合成释放沿用 keydown 快照）。
 - 忽略 `isComposing`/keyCode 229/`Process`/`Unidentified`，不拦截输入法；
-  启用时 keydown 默认 `preventDefault()`（可配置）。`blur`、`focusout`、
-  `pagehide`、页面隐藏、禁用和卸载都会释放所有已按下的键，避免远端卡键。
+  启用时 keydown 默认 `preventDefault()`（可配置）。Android 软键盘常在
+  `code` 为空时只给 `key`（如 SwiftKey 的 Backspace），此时用 key 名回退发送
+  Backspace/Delete/Enter/Tab/Escape/方向键等控制键；可打印字符不在回退表中，
+  仍只走 P3-3 的 `seq`，避免重复。`blur`、`focusout`、`pagehide`、页面隐藏、
+  禁用和卸载都会释放所有已按下的键，避免远端卡键。
 - 特殊动作走 Legacy `KeyEvent`（不是 `Misc`）：Windows 对端发
   `CtrlAltDel(100)`；其他平台发 `Delete` + `Alt/Ctrl` 且 `press:true`；
   `LockScreen(101)` 单发。P4-3 需根据 `PeerInfo.sas_enabled` 决定是否显示
@@ -368,15 +371,17 @@ npm run dev          # demo，http://localhost:5173
   禁用 Map），P4-1 应按 `PeerInfo.version >= 1.2.0`/平台决定是否启用并保留
   回退空间；IME/软键盘文本属于 P3-3。`test-fixtures/vp9.ts` 等与键盘无关。
 - 验证：`tests/input-keymaps.test.ts`（17 项表/平台/ISO/swap/lock 测试）、
-  `tests/input-keyboard.test.ts`（15 项 jsdom 事件序列/repeat/组合键/
-  composition/释放/特殊键/错误）、`tests/input-keyboard-integration.test.ts`
+  `tests/input-keyboard.test.ts`（16 项 jsdom 事件序列/repeat/组合键/
+  composition/软键盘无 code 控制键/释放/特殊键/错误）、
+  `tests/input-keyboard-integration.test.ts`
   （Node 假 DOM + 真实 mock hbbs/hbbr/peer 加密链路）；Playwright
   `tests/e2e/keyboard.spec.ts` 用真实浏览器键盘验证。
-- ⏳ 真机待验：真实桌面快捷键（尤其浏览器/OS 保留键）、IME 与 Android Map
-  仍需真实对端。与 P3-1 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），
-  按规则未重复发通知；P3-2 暂不勾选。
+- 真机验收（2026-11-20）：iPhone/Android 软键盘输入经 macOS 被控端验证，
+  包括 Android 第三方 IME（Microsoft SwiftKey）的 Enter/Backspace。浏览器/OS
+  保留快捷键（Cmd/Ctrl+W、Cmd+Tab 等）仍由浏览器拦截，任何普通网页都无法
+  发送；这是平台边界，不是库缺陷。
 
-## IME / 软键盘（P3-3，⏳ 真机待验）
+## IME / 软键盘（P3-3，已完成）
 
 - `src/input/ime.ts` 的 `ImeInput` 管理一个隐藏 textarea：1×1、opacity 0、
   fixed、`font-size:16px`（避免 iOS 自动缩放），不用 `display:none`；
@@ -387,9 +392,12 @@ npm run dev          # demo，http://localhost:5173
 - 组合输入：`compositionend` 发送
   `KeyEvent{seq, mode: Translate, down:true, press:false}`；`input` 在
   composition 期间忽略，compositionend 后同步到达的尾随 input 用 0ms 抑制
-  窗口去重。普通输入（软键盘/insertText/表情等）在非 composing 时按
-  `input.data`/textarea 值发送 seq 并清空。P3-2 的 KeyboardInput 对
-  `isComposing`/229/Process 不发送也不拦截，物理键在 IME 聚焦时仍走 Map。
+  窗口去重。普通输入（软键盘/insertText/表情等）在非 composing 时只按
+  `input.data` 发送 seq 并清空；`deleteContentBackward/Forward` 与
+  `insertLineBreak/Paragraph` 不当作文本发送（删除由 P3-2 的控制键回退负责，
+  换行由 Enter keydown 负责），避免把 textarea 剩余值重复发送。P3-2 的
+  KeyboardInput 对 `isComposing`/229/Process 不发送也不拦截，物理键在 IME
+  聚焦时仍走 Map。
 - `paste` 同步读取 `clipboardData` 文本并发送 seq，同时
   `preventDefault`/`stopPropagation`，避免插入隐藏 textarea 或与未来
   document 级 P3-5 粘贴处理重复发送。P3-5 仍需按规范优先尝试
@@ -397,18 +405,20 @@ npm run dev          # demo，http://localhost:5173
 - `onViewportChange` 在 `visualViewport` resize/scroll 与 window resize 时
   上报 `{width,height,offsetTop,offsetLeft,scale}`（相同值去重），供 P4-3
   在软键盘弹出时调整布局；无 `visualViewport` 时回退 `innerWidth/Height`。
-- 验证：`tests/input-ime.test.ts`（13 项 jsdom：textarea 样式、plain input、
-  composition 顺序/去重、paste、focus/blur、禁用/卸载、viewport、错误）、
+- 验证：`tests/input-ime.test.ts`（15 项 jsdom：textarea 样式、plain input、
+  composition 顺序/去重、删除/换行 inputType、paste、focus/blur、禁用/卸载、
+  viewport、错误）、
   `tests/input-ime-integration.test.ts`（Node 假 DOM + 真实 mock 加密链路
   的 3 条 seq）、`tests/e2e/ime.spec.ts`（真实浏览器 insertText、合成
   composition、paste、viewport、禁用/启用，以及 IME 聚焦时物理 KeyA/
   Backspace 只发 Map 不发 seq）。
-- ⏳ 真机待验：真实 iOS/Android 中文输入、软键盘 Backspace/Enter、组合
-  结束时序（尾随 input 若在 0ms 后到达可能重复）与 visualViewport 布局需要
-  真机。与 P3-1/P3-2 同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按
-  规则未重复发通知；P3-3 暂不勾选。
+- 真机验收（2026-11-20）：iOS Safari 中文输入/删除、Android SwiftKey 中文
+  输入/删除均通过。SwiftKey 不发 composition 事件，直接以
+  `input{insertText}` 提交文本，并在删除时发
+  `input{deleteContentBackward, data:null}`；`onInput` 因此只对插入类
+  inputType 发送 `data`，删除/换行交给 P3-2 的按键回退，避免重复或错字。
 
-## 触摸手势（P3-4，⏳ 真机待验）
+## 触摸手势（P3-4，已完成）
 
 - `src/input/touch.ts` 的 `TouchInput` 只监听 Pointer Events，忽略
   `pointerType === 'mouse'`，因此可与 P3-1 同时挂载（混合设备）。attach 时
@@ -444,11 +454,10 @@ npm run dev          # demo，http://localhost:5173
   hbbs/hbbr/peer 加密链路，tap/drag/双指滚动）、`tests/e2e/touch.spec.ts`
   （Playwright `hasTouch` + CDP 多指：tap/双击/长按/拖动/捏合/双指滚动/
   禁用/黑边）。
-- ⏳ 真机待验：真实 iPhone/Android 的手势识别、slop、滚动/捏合切换、合成
-  鼠标过滤与软键盘共存需要真机。与 P3-1/P3-2/P3-3 同一阻塞（无 P4-1/P4-3
-  接线、无获授权真实环境），按规则未重复发通知；P3-4 暂不勾选。
+- 真机验收（2026-11-20）：iPhone/Android 的单击、长按右键、单指拖动、
+  双指滚动、双指捏合本地缩放、双击均符合预期；手势与软键盘共存正常。
 
-## 剪贴板（P3-5，⏳ 真机待验）
+## 剪贴板（P3-5，已完成）
 
 - `src/input/clipboard.ts` 的 `ClipboardController` 是框架无关的消息处理器：
   P4-1 拥有 `nextMessage()` 循环并把每条消息交给 `handleMessage()`，本模块
@@ -460,7 +469,9 @@ npm run dev          # demo，http://localhost:5173
     的 one-shot zstd 帧（RustDesk bulk compressor 的行为），校验声明长度并
     严格 UTF-8 解码。默认 `navigator.clipboard.writeText` 自动复制；无用户
     手势或权限被拒时回调 `{text, copied:false}`，P4-3 显示“复制”按钮并调用
-    `copyRemoteText()`（必须在点击手势中）。
+    `copyRemoteText()`（必须在点击手势中）。HTTP 等非安全上下文没有
+    Clipboard API 时，写入回退 `document.execCommand('copy')`（同样必须在
+    点击手势中）；本地→远端的读取则打开可见粘贴框，用户长按粘贴后发送。
   - 本地→远端：`sendText(text)` 发送 `Clipboard{format:Text, content:utf8}`
     （对端 `update_clipboard`，不是逐字输入）；发送抛错时按规格降级
     `KeyEvent{seq, mode:Translate}`。`sendLocalClipboard()` 用
@@ -479,13 +490,14 @@ npm run dev          # demo，http://localhost:5173
 - 验证：`tests/clipboard.test.ts`（18 项：文本过滤/MultiClipboards/zstd
   1–8 字节长度头/声明长度不符/UTF-8/去重/双向发送/seq 降级/字节上限/
   浏览器权限失败/门控/释放）、`tests/clipboard-integration.test.ts`（mock
-  hbbs/hbbr/peer 加密链路的双向文本）、`tests/e2e/clipboard.spec.ts`（真实
-  Chromium clipboard 权限：自动复制、压缩文本、点击读取本地剪贴板发送、
-  自动复制失败后的手动复制）。
-- ⏳ 真机待验：iOS Safari/Android Chrome 的 clipboard 权限、无手势自动写
-  失败后的手动复制、真实 RustDesk 对端双向同步需要真机。与 P3-1..P3-4
-  同一阻塞（无 P4-1/P4-3 接线、无获授权真实环境），按规则未重复发通知；
-  P3-5 暂不勾选。
+  hbbs/hbbr/peer 加密链路的双向文本）、`tests/clipboard-legacy.test.ts`
+  （jsdom：无 `navigator.clipboard` 时 `execCommand` 回退、注入适配器仍权威）、
+  `tests/e2e/clipboard.spec.ts`（真实 Chromium clipboard 权限：自动复制、
+  压缩文本、点击读取本地剪贴板发送、自动复制失败后的手动复制）。
+- 真机验收（2026-11-20）：iOS Safari/Android Chrome 与真实 macOS 被控端
+  双向文本同步通过。HTTP 页面的自动写失败后显示手动 Copy；点击时用
+  `execCommand` 回退写入。本地→远端点工具栏 Clipboard 打开粘贴框，
+  长按粘贴 → Send 即可。新增覆盖见 `tests/clipboard-legacy.test.ts`。
 
 ## 权限与只读（P3-6，已完成）
 
@@ -534,8 +546,8 @@ npm run dev          # demo，http://localhost:5173
   mock hbbs/hbbr/peer 加密链路撤销 keyboard：释放已按下的按键与鼠标按钮、
   后续按键/鼠标不发送、剪贴板发送被阻止；恢复后重新发送；readOnly 释放
   输入并阻止键盘/鼠标/剪贴板，恢复后重新发送）。
-- 无需真机：permission_info 是协议消息，mock 黑盒已覆盖；真实对端撤销留待
-  P5-5 最终验收。
+- 无需真机：permission_info 是协议消息，mock 黑盒已覆盖；真实对端撤销未在
+  本次只读会话中触发（对端权限未变），但 P3-6 已按同一消息路径实现。
 
 ## 会话层（P4-1，已完成）
 
@@ -590,7 +602,7 @@ npm run dev          # demo，http://localhost:5173
   密码；本端关闭不发 `Misc.close_reason`（v1/v2 web 同，WebSocket 足够）；
   `disable_keyboard` 协议字段与运行中 `Misc.option` 切换；Android Map 模式/
   触摸对端策略（P5-2）。
-- P4-1 验收为状态转换与 mock 集成，无需真机；真实 hbbs/client 连接留待 P5-5。
+- P4-1 验收为状态转换与 mock 集成；真实 hbbs/client 连接已在 P5-5 完成。
 
 ## React hook（P4-2，已完成）
 
@@ -630,8 +642,8 @@ npm run dev          # demo，http://localhost:5173
   `tests/e2e/strict-mode.spec.ts`（真实浏览器 StrictMode + 裸 WS server：仅
   1 个 live socket，卸载后 0）。`tests/mocks/fake-connection.ts` 抽取了 P4-1/
   P4-2 共用的 fake relay 与登录消息。
-- 无需真机：P4-2 验收是 React 生命周期/清理与 SSR；真实 RustDesk 连接留待
-  P3 真机/P5-5。
+- P4-2 验收是 React 生命周期/清理与 SSR；真实 RustDesk 连接已在 P3 真机/
+  P5-5 完成。
 
 ## Viewer 组件（P4-3，已完成）
 
@@ -689,9 +701,9 @@ npm run dev          # demo，http://localhost:5173
   `tests/e2e/viewer.spec.ts`（真实 Chromium 宿主页面 + StrictMode）。
   `tests/mocks/fake-yuv-canvas.ts` 供 jsdom 共用。`npm test` 406 passed/
   1 skipped；P4-3 完成时 8 个 Playwright 测试通过；typecheck/build 通过。
-- 无需真机：P4-3 验收是“可嵌入任意 React 页面”，已由 jsdom、SSR 与真实
-  Chromium 覆盖；真实 iOS/Android 的触摸/软键盘/剪贴板仍按 P3/P5 记录为
-  ⏳ 真机待验，未声称真机通过。
+- 真机验收：P4-3 的宿主嵌入由 jsdom、SSR 与真实 Chromium 覆盖；真实
+  iOS/Android 的触摸/软键盘/剪贴板已在 P5-1/P5-2 通过（含 iOS CSS 全屏
+  回退，见下文“真机验收”）。
 
 ## Demo 表单（P4-4，已完成）
 
@@ -710,8 +722,8 @@ npm run dev          # demo，http://localhost:5173
   一个 live client；只保存非密码字段；console 无密码；关闭后 socket 归零
   且密码框清空；重载恢复非密码字段）。`npm test` 406 passed/1 skipped；
   Playwright 9 passed；typecheck/build 通过。
-- 无需真机：P4-4 验收是表单接线/持久化/密码卫生；完整 RustDesk 握手继续由
-  P1-8 mock、P1-9 隔离 Docker 真连与 P5-5 真实环境覆盖。
+- P4-4 验收是表单接线/持久化/密码卫生；完整 RustDesk 握手由 P1-8 mock、
+  P1-9 隔离 Docker 真连与 P5-5 真实环境（已完成）覆盖。
 
 ## 性能与体积（P5-3，已完成）
 
@@ -721,15 +733,41 @@ npm run dev          # demo，http://localhost:5173
 - 启动/首帧/解码 FPS/页面 JS heap 的验收下限、实测数字、环境和方法见
   [docs/PERFORMANCE.md](docs/PERFORMANCE.md)；`tests/e2e/perf.spec.ts` 会断言
   这些下限。
-- 数据来自本地合成 keyframe/管线，不是远程网络或真机；P5-1/P5-2/P5-5 仍需
-  真机/授权验收。
+- 数字来自本地合成 keyframe/管线；真实网络与解码路径已在 P5-1/P5-2/P5-5
+  真机/授权会话中跑通，但这些帧率/内存数字仍以本机 harness 为准。
 
 ## 故障场景（P5-4，已完成）
 
 7 类故障（密码错误/对端离线/server key 错误/不可达/close_reason/网络中断/
 反代 1009）已用 mock hbbs/hbbr/peer 与实际 WebSocket close 覆盖；错误码、UI 与
-测试映射见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。这不是真机/最终
-验收；P5-1/P5-2 真机与 P5-5 授权只读会话仍未完成。
+测试映射见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。真机侧另验证了
+断网/恢复后的 Retry 重连（P5-1/P5-2）。
+
+## 真机验收（P5-1/P5-2/P5-5，已完成 2026-11-20）
+
+- 设备/环境：iPhone（iOS 26.6.2，Safari）、Android 15（Chrome
+  156.0.8078.79，Microsoft SwiftKey）。被控端为用户的 macOS（RustDesk
+  1.4.9），hbbs 为用户现有 `rd.example.com:21116`；会话在用户授权下进行，
+  未读取或修改任何 RustDesk 客户端配置。
+- 通过项（两端）：首屏、连接、画面、单击/拖动/长按右键/双指滚动/捏合/
+  双击、软键盘中文输入与删除、剪贴板双向同步、飞行模式断线后的 Retry
+  重连；`?simd=0` 强制非 SIMD VP9 路径也能连接和操控。
+- 全屏：Android Chrome 使用原生 Fullscreen API；iPhone Safari 不支持普通
+  元素的 Fullscreen API，viewer 使用 CSS 固定定位铺满可视区域。Safari 的
+  地址栏无法由网页隐藏，横屏时仍占用高度；需要真正全屏时请“添加到主屏幕”
+  以 standalone 模式打开，或在宿主 WKWebView/WebView 中嵌入。
+- 资源：运行时无 gstatic/CanvasKit/Flutter 引用，VP9 解码器与 worker 均为
+  同源资源（`src/assets.ts`）；真机会话未发出外部 CDN 请求。
+- 验收中发现并修复：
+  1. iPhone Safari 全屏按钮因缺少原生 API 而 disabled → 增加 CSS 铺满回退。
+  2. HTTP 局域网页面没有 `navigator.clipboard` → 增加 `execCommand('copy')`
+     写入回退和“长按粘贴 → Send”输入框；自动复制失败仍显示手动 Copy。
+  3. Android SwiftKey 中文/退格异常 → IME 只按 `insertText` 的 `data` 发送，
+     删除/换行交给 KeyboardInput；软键盘 `code` 为空时按 `key` 回退发送
+     Backspace/Enter 等控制键。
+- 自动化：`npm test` 422 passed + 1 real-server、`npm run test:real` 1 passed、
+  `npm run test:canvas` 10 passed、`npm run test:decoder` OK、typecheck/build
+  （含体积门禁）通过。`demo/ime-events.html` 可复现软键盘事件序列。
 
 ## 本机 Docker 真连环境（P1-9）
 

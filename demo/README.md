@@ -69,5 +69,16 @@ Demo-specific notes:
 
 - The Vite page is plain HTTP, so the demo uses `ws://`; for a LAN demo allow
   the hbbs/hbbr WebSocket ports (or put them behind the same TLS proxy).
+- HTTP is not a secure context, so `navigator.clipboard` is unavailable. The
+  viewer falls back to `document.execCommand('copy')` for manual copies and
+  shows a paste field (long-press → Paste → Send) for local→remote text.
 - Leave `Asset Base URL` empty to use the viewer's default `/rustdesk-assets/`;
   `predev` copies the assets into `demo/public/rustdesk-assets/`.
+
+## Diagnostics
+
+- Append `?simd=0` or `?simd=1` to force the non-SIMD/SIMD VP9 decoder. Used
+  by the P5-1/P5-2 checklist to cover the iOS 15/16.3 path on newer phones.
+- `/ime-events.html` logs `keydown`/`beforeinput`/`input`/composition events
+  from a library-shaped hidden textarea. Use it to capture third-party IME
+  behavior (e.g. Android SwiftKey) when input mapping misbehaves.
