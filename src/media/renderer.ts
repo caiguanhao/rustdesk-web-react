@@ -59,6 +59,43 @@ interface VendorDocument extends Document {
   webkitExitFullscreen?(): Promise<void> | void;
 }
 
+/**
+ * iPhone Safari has no Fullscreen API for non-video elements and some hosts
+ * embed the viewer in an iframe without `allowfullscreen`. The renderer then
+ * fills the visual viewport with a fixed-position CSS overlay instead. The
+ * attribute lives on the viewer root (which also contains the toolbar and
+ * notices), so the controls stay reachable. `!important` beats the React
+ * inline `position: relative` / `aspect-ratio` from the shell style.
+ */
+const CSS_FULLSCREEN_ATTRIBUTE = 'data-rustdesk-css-fullscreen';
+const CSS_FULLSCREEN_STYLE_ID = 'rustdesk-css-fullscreen';
+const CSS_FULLSCREEN_RULES = `
+[${CSS_FULLSCREEN_ATTRIBUTE}] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-width: none !important;
+  max-height: none !important;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+  z-index: 2147483647 !important;
+  touch-action: none;
+}
+[${CSS_FULLSCREEN_ATTRIBUTE}] [data-rustdesk-toolbar] {
+  bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+}
+`;
+
+function ensureCssFullscreenStyle(doc: Document): void {
+  if (doc.getElementById(CSS_FULLSCREEN_STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = CSS_FULLSCREEN_STYLE_ID;
+  style.textContent = CSS_FULLSCREEN_RULES;
+  (doc.head ?? doc.documentElement).appendChild(style);
+}
+
 function defaultFrameSink(
   canvas: HTMLCanvasElement,
   preferWebGL: boolean,
@@ -99,6 +136,7 @@ export class VideoRenderer implements VideoSink {
   private readonly fullscreenListener: () => void;
   private currentFrame: { width: number; height: number } | null = null;
   private currentLayout: RendererLayout | null = null;
+  private cssFullscreen = false;
   private disposed = false;
 
   constructor(
@@ -148,19 +186,15 @@ export class VideoRenderer implements VideoSink {
     return this.currentLayout;
   }
 
-  /** Whether this container exposes a usable fullscreen API. */
+  /** Native fullscreen or the CSS viewport-fill fallback is always available. */
   get fullscreenSupported(): boolean {
-    if (this.disposed) return false;
-    const element = this.container as VendorFullscreenElement;
-    return (
-      typeof element.requestFullscreen === 'function' ||
-      typeof element.webkitRequestFullscreen === 'function'
-    );
+    return !this.disposed;
   }
 
-  /** True while this renderer's container is the fullscreen element. */
+  /** True while native fullscreen or the CSS fallback is active. */
   get fullscreen(): boolean {
     if (this.disposed || typeof document === 'undefined') return false;
+    if (this.cssFullscreen) return true;
     const doc = document as VendorDocument;
     return (
       (doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null) ===
@@ -254,24 +288,37 @@ export class VideoRenderer implements VideoSink {
     };
   }
 
-  /** Fullscreen the container; false if unsupported (e.g. iPhone Safari). */
+  /**
+   * Fullscreen the container. Uses the native API when available and falls
+   * back to the CSS viewport fill when it is missing or rejected (iPhone
+   * Safari, iframes without `allowfullscreen`). Returns false only after
+   * disposal.
+   */
   async requestFullscreen(): Promise<boolean> {
     if (this.disposed) return false;
+    if (this.cssFullscreen) return true;
     const element = this.container as VendorFullscreenElement;
     const request =
       element.requestFullscreen?.bind(element) ??
       element.webkitRequestFullscreen?.bind(element);
-    if (!request) return false;
-    try {
-      await request();
-      this.resize();
-      return true;
-    } catch {
-      return false;
+    if (request) {
+      try {
+        await request();
+        this.resize();
+        return true;
+      } catch {
+        // Fall through to the CSS fallback.
+      }
     }
+    this.enterCssFullscreen();
+    return true;
   }
 
   async exitFullscreen(): Promise<void> {
+    if (this.cssFullscreen) {
+      this.exitCssFullscreen();
+      return;
+    }
     if (typeof document === 'undefined') return;
     const doc = document as VendorDocument;
     const fullscreenElement =
@@ -283,7 +330,7 @@ export class VideoRenderer implements VideoSink {
       await exit();
       this.resize();
     } catch {
-      // Ignore; P4-3 can fall back to CSS sizing.
+      // Ignore; the CSS fallback still covers hosts without a working API.
     }
   }
 
@@ -291,6 +338,10 @@ export class VideoRenderer implements VideoSink {
     if (this.disposed) return;
     this.clear();
     this.disposed = true;
+    if (this.cssFullscreen) {
+      this.cssFullscreen = false;
+      this.container.removeAttribute(CSS_FULLSCREEN_ATTRIBUTE);
+    }
     this.resizeObserver?.disconnect();
     if (this.windowResize) window.removeEventListener('resize', this.windowResize);
     if (typeof document !== 'undefined') {
@@ -299,6 +350,23 @@ export class VideoRenderer implements VideoSink {
     }
     this.currentLayout = null;
     this.currentFrame = null;
+  }
+
+  private enterCssFullscreen(): void {
+    if (this.disposed || this.cssFullscreen) return;
+    this.cssFullscreen = true;
+    ensureCssFullscreenStyle(this.container.ownerDocument);
+    this.container.setAttribute(CSS_FULLSCREEN_ATTRIBUTE, '');
+    this.resize();
+    this.onFullscreenChange?.(true);
+  }
+
+  private exitCssFullscreen(): void {
+    if (!this.cssFullscreen) return;
+    this.cssFullscreen = false;
+    this.container.removeAttribute(CSS_FULLSCREEN_ATTRIBUTE);
+    this.resize();
+    this.onFullscreenChange?.(false);
   }
 
   private canvasRect(): DOMRect | null {

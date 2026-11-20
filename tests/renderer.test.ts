@@ -305,15 +305,22 @@ describe('VideoRenderer', () => {
     expect(harness.releases).toBe(1);
   });
 
-  it('requests fullscreen on the container and reports unsupported/failed', async () => {
+  it('uses native fullscreen and falls back to the CSS overlay on rejection', async () => {
     const harness = mount();
     const request = vi.fn(async () => undefined);
     define(harness.container, 'requestFullscreen', request);
     await expect(harness.renderer.requestFullscreen()).resolves.toBe(true);
     expect(request).toHaveBeenCalledTimes(1);
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(false);
 
     request.mockRejectedValueOnce(new Error('denied'));
-    await expect(harness.renderer.requestFullscreen()).resolves.toBe(false);
+    await expect(harness.renderer.requestFullscreen()).resolves.toBe(true);
+    expect(harness.container.getAttribute('data-rustdesk-css-fullscreen')).toBe('');
+    expect(harness.renderer.fullscreen).toBe(true);
+
+    await harness.renderer.exitFullscreen();
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(false);
+    expect(harness.renderer.fullscreen).toBe(false);
   });
 
   it('exposes fullscreen support/state and notifies on changes', () => {
@@ -321,11 +328,11 @@ describe('VideoRenderer', () => {
     const harness = mount({
       onFullscreenChange: (fullscreen) => changes.push(fullscreen),
     });
-    expect(harness.renderer.fullscreenSupported).toBe(false);
+    // The CSS fallback keeps the control usable without a native API.
+    expect(harness.renderer.fullscreenSupported).toBe(true);
     expect(harness.renderer.fullscreen).toBe(false);
 
     define(harness.container, 'requestFullscreen', vi.fn(async () => undefined));
-    expect(harness.renderer.fullscreenSupported).toBe(true);
 
     define(document, 'fullscreenElement', harness.container);
     document.dispatchEvent(new Event('fullscreenchange'));
@@ -338,10 +345,42 @@ describe('VideoRenderer', () => {
     expect(changes).toEqual([true, false]);
   });
 
-  it('reports unsupported fullscreen when the browser has no API', async () => {
-    const harness = mount();
+  it('uses the CSS fallback when the browser has no fullscreen API', async () => {
+    const changes: boolean[] = [];
+    const harness = mount({
+      onFullscreenChange: (fullscreen) => changes.push(fullscreen),
+    });
     define(harness.container, 'requestFullscreen', undefined);
-    await expect(harness.renderer.requestFullscreen()).resolves.toBe(false);
+    define(harness.container, 'webkitRequestFullscreen', undefined);
+    await expect(harness.renderer.requestFullscreen()).resolves.toBe(true);
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(
+      true,
+    );
+    expect(harness.renderer.fullscreen).toBe(true);
+    expect(changes).toEqual([true]);
+    expect(document.getElementById('rustdesk-css-fullscreen')).not.toBeNull();
+
+    // A second call is idempotent (no duplicate change event).
+    await expect(harness.renderer.requestFullscreen()).resolves.toBe(true);
+    expect(changes).toEqual([true]);
+
+    await harness.renderer.exitFullscreen();
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(
+      false,
+    );
+    expect(changes).toEqual([true, false]);
+  });
+
+  it('removes the CSS fullscreen overlay on dispose', async () => {
+    const harness = mount();
+    await harness.renderer.requestFullscreen();
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(
+      true,
+    );
+    harness.renderer.dispose();
+    expect(harness.container.hasAttribute('data-rustdesk-css-fullscreen')).toBe(
+      false,
+    );
   });
 
   it('falls back to the prefixed fullscreen API', async () => {
