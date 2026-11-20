@@ -667,7 +667,13 @@ export class RustDeskSession {
     init = (async () => {
       let decoder: SessionVideoDecoder;
       try {
-        decoder = await create({ assetBaseUrl: this.config.assetBaseUrl });
+        const decoderOptions: Vp9DecoderOptions = {
+          assetBaseUrl: this.config.assetBaseUrl,
+        };
+        if (this.config.decoderSimd !== undefined) {
+          decoderOptions.simd = this.config.decoderSimd;
+        }
+        decoder = await create(decoderOptions);
       } catch (cause) {
         if (this.videoInit === init) {
           this.report(

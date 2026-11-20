@@ -37,6 +37,12 @@ export interface RustDeskSessionConfig {
   relayUrl?: string;
   /** Location of the ogv.js VP9 assets copied by `copy-assets`. Same-origin. */
   assetBaseUrl?: string;
+  /**
+   * Force the SIMD or non-SIMD VP9 decoder; omit to feature-detect (with the
+   * mandatory non-SIMD fallback). Diagnostics only: lets a newer phone verify
+   * the iOS 15/16.3 no-SIMD path (e.g. the demo's `?simd=0`).
+   */
+  decoderSimd?: boolean;
   /** Capture quality hint; defaults to `balanced`. */
   imageQuality?: ImageQuality;
   /**

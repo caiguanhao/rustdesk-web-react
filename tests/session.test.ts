@@ -611,6 +611,28 @@ describe('RustDeskSession', () => {
     expect(decoder.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards a forced decoder SIMD choice', async () => {
+    const frame = { width: 64, height: 64 };
+    const decoder = {
+      decode: vi.fn(async () => frame),
+      recycle: vi.fn(),
+      rebuild: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const createDecoder = vi.fn(async () => decoder);
+    const harness = makeHarness({
+      config: { assetBaseUrl: '/assets/', decoderSimd: false },
+      deps: { createDecoder },
+    });
+    await connect(harness);
+    harness.session.setVideoSink({ draw: vi.fn() });
+    await waitFor(() => createDecoder.mock.calls.length === 1, 1000);
+    expect(createDecoder).toHaveBeenCalledWith({
+      assetBaseUrl: '/assets/',
+      simd: false,
+    });
+  });
+
   it('returns working unsubscribe functions and swallows listener errors', async () => {
     const harness = makeHarness();
     const seen: string[] = [];

@@ -46,6 +46,18 @@ function environmentDefaults(): FormValues {
   };
 }
 
+/**
+ * `?simd=0` / `?simd=1` forces the VP9 decoder path. Used by the P5 real-device
+ * checklist to cover the non-SIMD build on devices that support SIMD.
+ */
+function decoderSimdFromUrl(): boolean | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const value = new URLSearchParams(window.location.search).get('simd');
+  if (value === '0') return false;
+  if (value === '1') return true;
+  return undefined;
+}
+
 /** Env values are first-run defaults; later form submissions win. */
 function loadForm(): FormValues {
   const values = environmentDefaults();
@@ -153,6 +165,7 @@ export function App() {
     setFormError(null);
     setStatus({ status: 'connecting' });
     setPeerInfo(null);
+    const decoderSimd = decoderSimdFromUrl();
     setActive({
       server: values.server,
       serverKey: optional(values.serverKey),
@@ -160,6 +173,7 @@ export function App() {
       id: values.id,
       password: password === '' ? undefined : password,
       assetBaseUrl: optional(values.assetBaseUrl),
+      ...(decoderSimd === undefined ? {} : { decoderSimd }),
     });
     // The viewer's config snapshot keeps the password; the form does not.
     setPassword('');

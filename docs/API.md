@@ -48,6 +48,7 @@ import {
 | `rendezvousUrl` | `string?` | 无 | 显式 rendezvous WebSocket URL（mock/非标准反代）。优先于 `server`。 |
 | `relayUrl` | `string?` | 无 | 显式 relay WebSocket URL。优先于其他来源。 |
 | `assetBaseUrl` | `string?` | `/rustdesk-assets/` | ogv.js VP9 资源基址，相对 `document.baseURI` 解析且要求同源。 |
+| `decoderSimd` | `boolean?` | 自动检测 | 强制 SIMD/非 SIMD VP9 解码器；省略时 feature-detect 并回退非 SIMD。用于真机诊断（如 `?simd=0` 覆盖 iOS 15/16.3 路径）。 |
 | `imageQuality` | `'low' \| 'balanced' \| 'best'` | `'balanced'` | 请求的捕获质量（RustDesk image quality）。 |
 | `readOnly` | `boolean?` | `false` | 只读：禁止鼠标/键盘/触摸/IME/剪贴板发送，也不应用远端剪贴板；viewer 显示只读徽标。 |
 | `disableClipboard` | `boolean?` | `false` | 双向关闭剪贴板；鼠标/键盘/触摸仍可用。 |
