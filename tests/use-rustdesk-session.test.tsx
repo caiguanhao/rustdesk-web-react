@@ -15,6 +15,7 @@ import {
   type UseRustDeskSessionOptions,
 } from '../src/react/useRustDeskSession';
 import type { PeerInfo } from '../src/session/peer-info';
+import { h1Base64 } from './mocks/credentials';
 import {
   FAKE_HASH,
   FakeConnection,
@@ -266,5 +267,109 @@ describe('useRustDeskSession', () => {
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(errors).toEqual([failure]);
     expect(result.current.error).toBe(failure);
+  });
+
+  it('logs in with a hash object after password-required', async () => {
+    const factory = makeFactory();
+    const { result } = renderHook(() =>
+      useRustDeskSession(
+        { ...baseConfig, password: undefined },
+        { createSession: factory.createSession },
+      ),
+    );
+    await waitFor(() => expect(factory.connections).toHaveLength(1));
+    factory.connections[0]!.push({ hash: FAKE_HASH });
+    await waitFor(() =>
+      expect(result.current.status).toBe('password-required'),
+    );
+
+    const h1 = h1Base64('secret', FAKE_HASH.salt);
+    let login: Promise<PeerInfo> | undefined;
+    act(() => {
+      login = result.current.connect({ hash: h1, salt: FAKE_HASH.salt });
+    });
+    factory.connections[0]!.push(peerInfoPayload());
+    await act(async () => {
+      await login;
+    });
+    await expectConnected(result);
+  });
+
+  it('reads the latest serverKeyProvider without recreating the session', async () => {
+    const factory = makeFactory();
+    const configs: RustDeskSessionConfig[] = [];
+    const createSession = (config: RustDeskSessionConfig): RustDeskSession => {
+      configs.push(config);
+      return factory.createSession(config);
+    };
+    const { rerender } = renderHook(
+      ({ provider }: { provider: () => string }) =>
+        useRustDeskSession(
+          { ...baseConfig, serverKeyProvider: provider },
+          { createSession, autoConnect: false },
+        ),
+      { initialProps: { provider: () => 'first' } },
+    );
+
+    await waitFor(() => expect(configs).toHaveLength(1));
+    const stable = configs[0]!.serverKeyProvider!;
+    await expect(Promise.resolve(stable())).resolves.toBe('first');
+
+    rerender({ provider: () => 'second' });
+    expect(configs).toHaveLength(1);
+    await expect(Promise.resolve(stable())).resolves.toBe('second');
+  });
+
+  it('recreates only when passwordHash or verifier content changes', async () => {
+    const factory = makeFactory();
+    const configs: RustDeskSessionConfig[] = [];
+    const createSession = (config: RustDeskSessionConfig): RustDeskSession => {
+      configs.push(config);
+      return factory.createSession(config);
+    };
+    const h1 = h1Base64('secret', 'salt');
+    const { rerender } = renderHook(
+      ({
+        hash,
+        verifier,
+      }: {
+        hash: { hash: string; salt?: string };
+        verifier: { publicKey: string; verifier: string };
+      }) =>
+        useRustDeskSession(
+          {
+            ...baseConfig,
+            password: undefined,
+            passwordHash: hash,
+            serverKeyVerifier: verifier,
+          },
+          { createSession, autoConnect: false },
+        ),
+      {
+        initialProps: {
+          hash: { hash: h1, salt: 'salt' },
+          verifier: { publicKey: 'pk', verifier: 'v1' },
+        },
+      },
+    );
+
+    await waitFor(() => expect(configs).toHaveLength(1));
+    rerender({
+      hash: { hash: h1, salt: 'salt' },
+      verifier: { publicKey: 'pk', verifier: 'v1' },
+    });
+    expect(configs).toHaveLength(1);
+
+    rerender({
+      hash: { hash: h1, salt: 'other' },
+      verifier: { publicKey: 'pk', verifier: 'v1' },
+    });
+    await waitFor(() => expect(configs).toHaveLength(2));
+
+    rerender({
+      hash: { hash: h1, salt: 'other' },
+      verifier: { publicKey: 'pk', verifier: 'v2' },
+    });
+    await waitFor(() => expect(configs).toHaveLength(3));
   });
 });

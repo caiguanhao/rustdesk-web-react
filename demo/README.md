@@ -5,7 +5,8 @@ copies the VP9 assets to `demo/public/rustdesk-assets/`. Open the printed URL,
 fill the form and press Connect. The page embeds `<RustDeskViewer autoConnect />`;
 the viewer owns the canvas, overlays, toolbar and input wiring. The
 viewer/protocol/renderer code is lazy-loaded after Connect, so the form itself
-stays light.
+stays light. A generated `<RustDeskViewer />` snippet at the bottom follows the
+selected credential mode.
 
 ```bash
 npm run dev
@@ -20,13 +21,37 @@ dev:peer`).
 
 ## Form and environment
 
-Fields: Server, Server Key, Relay (optional), Device ID, Password, Asset Base
-URL. `VITE_RD_*` values are first-run defaults:
+Fields: Credential mode, Server, Server Key, Password, Relay (optional),
+Device ID, Asset Base URL, plus hash-mode fields:
+
+- **Plaintext password**: password is passed to the viewer directly.
+- **passwordHash + serverKeyVerifier**: enter Password + Password Salt and
+  click **Get passwordHash + serverKeyVerifier**. The Vite dev/preview
+  middleware (`/api/rustdesk/credential`) computes
+  `base64(SHA256(UTF8(password) || UTF8(salt)))` and signs
+  `"1000::<serverKey>"` with a fresh Ed25519 keypair. The response fills the
+  read-only Password Hash / Verifier Public Key / Verifier fields, and Connect
+  uses those fetched values.
+
+  The Salt is the controlled device's `Hash.salt`. Copy `salt = "..."` from
+  its `RustDesk.toml`:
+
+  | Platform | Path |
+  | --- | --- |
+  | macOS | `~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml` |
+  | Linux | `~/.config/rustdesk/RustDesk.toml` |
+  | Linux root/service | `/root/.config/rustdesk/RustDesk.toml` |
+  | Linux Flatpak | `~/.var/app/com.rustdesk.RustDesk/config/rustdesk/RustDesk.toml` |
+  | Windows | `%APPDATA%\RustDesk\config\RustDesk.toml` |
+
+`VITE_RD_*` values are first-run defaults:
 
 | Variable | Meaning |
 | --- | --- |
+| `VITE_RD_CREDENTIAL_MODE` | `password` (default) or `hash` |
 | `VITE_RD_SERVER` | hbbs host or `host:port` |
 | `VITE_RD_KEY` | hbbs Ed25519 public key (base64), self-hosted |
+| `VITE_RD_SALT` | peer `Hash.salt`; copy `salt = "..."` from `RustDesk.toml` (paths above) |
 | `VITE_RD_RELAY` | optional relay override |
 | `VITE_RD_ID` | remote device ID |
 | `VITE_RD_PASSWORD` | optional local password prefill |
@@ -37,24 +62,37 @@ Copy `demo/.env.example` to `demo/.env.local` and edit it locally. The whole
 one) because it may contain a remote-device password. Never commit a real
 password or server key.
 
-## Persistence and password handling
+## Persistence and credential handling
 
-- On Connect, the five **non-password** fields are saved under
+- On Connect, all form fields **except Password** are saved under
   `localStorage['rustdesk-web-react.demo.form.v1']`; on the next page load they
-  override the `VITE_RD_*` defaults. Clear that key in DevTools to go back to
-  the env defaults. The save/load field list is one constant; the password is
-  outside it.
+  override the `VITE_RD_*` defaults. This includes Server Key and Salt. Clear
+  that key in DevTools to go back to the env defaults. The save/load field list
+  is one constant; the password and the fetched hash/verifier are outside it.
 - The viewer chunk (and its protocol/renderer dependencies) loads on Connect,
   not with the initial form.
-- The password is React state only. It is never written to localStorage, the
-  URL or the console, and the demo does not log connection configs. After
-  submit it is cleared from the form; the viewer keeps the submitted value in
-  its session config. "Change settings" unmounts the viewer, disposes the
-  session and returns to the form with an empty password (unless
-  `VITE_RD_PASSWORD` prefills it on the next load).
-- Leave the password empty to let the viewer's built-in prompt (or a host's
-  `onPasswordRequired`) ask for it. Wrong-password retries stay on the same
-  connection/Hash.
+- Password and the fetched hash/verifier are React state only. They are never
+  written to localStorage, the URL or the console, and the demo does not log
+  connection configs. After submit the password is cleared from the form; the
+  viewer keeps the submitted credential in its session config. "Change
+  settings" unmounts the viewer, disposes the session and clears the fetched
+  credential (unless `VITE_RD_PASSWORD` prefills the password on the next load).
+- Leave Password empty in plaintext mode to let the viewer's built-in prompt
+  (or a host's `onPasswordRequired`) ask for it. Wrong-password retries stay on
+  the same connection/Hash. Hash mode requires a password, Salt, and a fetched
+  credential before Connect.
+- Hash mode calls the local Vite dev/preview API
+  `/api/rustdesk/credential`. It is a demo stand-in for a real backend: the API
+  receives the plaintext password over localhost, computes the h1 from the
+  supplied Salt, and returns `{ passwordHash, serverKeyVerifier }`. It is not
+  part of the static build and must not be used in production. The verifier is
+  a signed encoding, not encryption: its payload is plaintext and can be
+  decoded by the browser.
+- The generated snippet at the bottom of the page shows the selected mode with
+  server/id/verifier values. In plaintext mode the password stays a
+  placeholder; in hash mode, after **Get passwordHash + serverKeyVerifier**,
+  the snippet contains the fetched h1 and verifier. Treat that snippet as a
+  credential.
 
 ## Network, assets and troubleshooting
 

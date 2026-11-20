@@ -220,6 +220,74 @@ describe('RustDeskViewer', () => {
     ).toBeNull();
   });
 
+  it('lets the host answer the password prompt with a hash object synchronously', async () => {
+    const login = vi
+      .spyOn(RustDeskSession.prototype, 'login')
+      .mockResolvedValue(PEER);
+    const hash = {
+      hash: 'aQNI1fI700gr19YEVZ0wuC2GsbJL5iG4ghFlrTaUNmE=',
+      salt: 'salt',
+    };
+    const onPasswordRequired = vi.fn().mockReturnValue(hash);
+    renderViewer({ autoConnect: true, onPasswordRequired });
+
+    await waitFor(() => expect(session).toBeDefined());
+    act(() => {
+      emit('status', { status: 'password-required', retry: false });
+    });
+
+    await waitFor(() => expect(login).toHaveBeenCalledWith(hash));
+    expect(
+      screen.queryByLabelText('Enter the remote device password'),
+    ).toBeNull();
+  });
+
+  it('lets the host resolve the password prompt with a hash object', async () => {
+    const login = vi
+      .spyOn(RustDeskSession.prototype, 'login')
+      .mockResolvedValue(PEER);
+    const hash = {
+      hash: 'aQNI1fI700gr19YEVZ0wuC2GsbJL5iG4ghFlrTaUNmE=',
+      salt: 'salt',
+    };
+    const onPasswordRequired = vi.fn().mockResolvedValue(hash);
+    renderViewer({ autoConnect: true, onPasswordRequired });
+
+    await waitFor(() => expect(session).toBeDefined());
+    act(() => {
+      emit('status', { status: 'password-required', retry: false });
+    });
+
+    await waitFor(() => expect(login).toHaveBeenCalledWith(hash));
+    expect(
+      screen.queryByLabelText('Enter the remote device password'),
+    ).toBeNull();
+  });
+
+  it('falls back to the form when a hashed login is rejected without looping', async () => {
+    const login = vi
+      .spyOn(RustDeskSession.prototype, 'login')
+      .mockRejectedValue(
+        new RustDeskError('invalid-config', 'bad hash'),
+      );
+    const hash = { hash: 'bad', salt: 'salt' };
+    const onPasswordRequired = vi.fn().mockReturnValue(hash);
+    renderViewer({ autoConnect: true, onPasswordRequired });
+
+    await waitFor(() => expect(session).toBeDefined());
+    act(() => {
+      emit('status', { status: 'password-required', retry: false });
+    });
+
+    await waitFor(() => expect(login).toHaveBeenCalledWith(hash));
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText('Enter the remote device password'),
+      ).not.toBeNull(),
+    );
+    expect(onPasswordRequired).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to the built-in form and submits the password', async () => {
     const login = vi
       .spyOn(RustDeskSession.prototype, 'login')

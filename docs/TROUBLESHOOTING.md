@@ -14,8 +14,10 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 | 场景 | 类型化结果 | 测试 |
 | --- | --- | --- |
 | 密码错误 | `password-required{retry:true, detail}`（不是 `error`，同一 Hash 重试） | `tests/login.test.ts`（same Hash）、`tests/session-integration.test.ts`、viewer 表单 |
+| h1 salt 不匹配 | `password-required{retry:false, detail:'Password hash salt mismatch'}`，不发 LoginRequest | `tests/login.test.ts`、`tests/session.test.ts`、`tests/session-integration.test.ts` |
 | 对端离线 | `peer-offline` | `tests/mock-server.test.ts`、`tests/session-integration.test.ts` |
-| server key 错误 | `server-key-invalid` | `tests/mock-server.test.ts`、`tests/secure.test.ts`、session failure |
+| server key 错误 | `server-key-invalid`（静态 key 或 verifier） | `tests/mock-server.test.ts`、`tests/secure.test.ts`、`tests/server-key.test.ts`、session failure |
+| server key provider 失败 | `server-key-missing`（socket 未打开） | `tests/server-key.test.ts`、`tests/session.test.ts`、`tests/session-integration.test.ts` |
 | 服务器不可达 | `server-unreachable`（或静默丢包时 `timeout`） | `tests/websock.test.ts`、`tests/session-integration.test.ts` |
 | 对端 close_reason | 登录后 `disconnected{detail}`；登录前 `error`+`peer-closed` | `tests/session-integration.test.ts`、`tests/session.test.ts`（登录后）、`tests/login.test.ts`/`tests/secure.test.ts`（登录前）、viewer disconnected |
 | 网络中断 | 收到 close → `connection-lost`；无 close 的静默丢包 → `timeout` | `tests/session-integration.test.ts`（server shutdown）、`tests/session.test.ts`（read timeout）、`tests/websock.test.ts` |
@@ -28,12 +30,12 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 
 | 现象 | 通常阶段 | 先检查 |
 | --- | --- | --- |
-| 立即 `invalid-config` | 配置/URL | `server` 是否 `host[:port]`、HTTPS 页面是否用了 `ws://` |
+| 立即 `invalid-config` | 配置/URL/凭据 | `server` 是否 `host[:port]`、HTTPS 页面是否用了 `ws://`、`password` 与 `passwordHash` 是否同时非空、h1 是否 base64 32 字节 |
 | `server-unreachable` / `timeout` | WebSocket 打开前 | hbbs 21118 / hbbr 21119 地址/端口、防火墙、反代 502/504、TLS；静默丢包常是 `timeout` |
-| 卡在 `connecting` | rendezvous | hbbs WS 21118、PunchHoleResponse、对端 ID |
+| 卡在 `connecting` | rendezvous 或 key 解析 | hbbs WS 21118、PunchHoleResponse、对端 ID；若用了 `serverKeyProvider`，检查它是否卡住/超时 |
 | 卡在 `securing`（约 18s 后 `handshake-timeout`） | relay/安全握手 | hbbr WS 21119、首腿配对、serverKey、对端在线；客户端 18s 上限，hbbr 可能等 30s |
 | 卡在 `authenticating` / `awaiting-approval` | 登录 | 对端是否等待接受、密码、2FA、登录 60s 预算 |
-| `password-required` | 登录 | 密码/重试，不是网络错误 |
+| `password-required` | 登录 | 密码/重试；detail 为 `Password hash salt mismatch` 时检查 h1 的 salt，不是网络错误 |
 | 已连接但黑屏 | 解码/资源 | `asset-load-failed`、CSP、`.wasm` MIME、非 VP9 |
 | 输入无反应 | 权限/焦点 | `readOnly`、对端权限、viewer 是否聚焦、Android 对端 |
 | 剪贴板失败 | 浏览器权限/安全上下文 | HTTPS/localhost、用户手势、`clipboard-unavailable` |
@@ -42,7 +44,7 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 
 | 代码 | 常见原因 | 处理 |
 | --- | --- | --- |
-| `invalid-config` | server 为空/格式错误、端口越界、显式 URL 非 ws(s)、HTTPS 页面用 ws:// | 按[部署](DEPLOYMENT.md)修正；HTTPS 全部用 wss 或反代路径。 |
+| `invalid-config` | server 为空/格式错误、端口越界、显式 URL 非 ws(s)、HTTPS 页面用 ws://、`password`+`passwordHash` 冲突、h1 非 base64/非 32 字节、retry h1 salt 不匹配 | 按[部署](DEPLOYMENT.md)修正；HTTPS 全部用 wss 或反代路径；凭据问题见[API](API.md#凭据与-server-key-语义)。 |
 | `invalid-state` | active 状态重复 connect；无登录 flow 时 login；session 尚未挂载就调 ref.connect | 等当前连接结束/卸载完成；用 `status` 判断。 |
 | `aborted` | AbortSignal/dispose 取消 | 预期（组件卸载/取消）；不要当故障。 |
 | `server-unreachable` | hbbs 21118 或 hbbr 21119 的 WS 打不开：未监听、反代缺 Upgrade、TLS 失败 | 先查反代 error.log/`ss -ltnp`；浏览器拿不到 HTTP 502/504 状态。静默丢包常表现为下面的 `timeout`。 |
@@ -52,8 +54,8 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 | `id-not-found` / `peer-offline` | 被控端 ID 未注册/离线 | 在对端启动 RustDesk 并确认 ID；等待注册。 |
 | `unsupported-version` | RelayResponse 缺少版本字段（服务端/协议版本不受支持） | 检查 hbbs/hbbr 版本与兼容性；不要绕过安全校验。 |
 | `message-too-large` | WebSocket close 1009；剪贴板 >4 MiB | 查 hbbr/CDN/WAF 上限；降低画质；不要拆视频帧。 |
-| `server-key-missing` | 未提供 serverKey，或 hbbs 无签名私钥（RelayResponse.pk 空） | 自建服务器填 base64 公钥；确认 hbbs 数据目录有完整密钥对。 |
-| `server-key-invalid` | key 格式错误、与 hbbs 不匹配、licence 不匹配 | 用同一 hbbs 的 `id_ed25519.pub`（去掉换行）。 |
+| `server-key-missing` | 未提供 serverKey、`serverKeyProvider` 抛错/返回非字符串、或 hbbs 无签名私钥（RelayResponse.pk 空） | 自建服务器填 base64 公钥或修 provider；确认 hbbs 数据目录有完整密钥对。provider 错误不会降级。 |
+| `server-key-invalid` | key 格式错误、与 hbbs 不匹配、licence 不匹配，或 `serverKeyVerifier` 验签/提取失败 | 用同一 hbbs 的 `id_ed25519.pub`（去掉换行）；verifier 检查 publicKey/签名和 `1000::<key>` payload。 |
 | `peer-signature-invalid` / `peer-id-mismatch` / `peer-key-invalid` | 对端身份/签名/公钥异常 | 确认连的是目标 ID；重试/升级对端；不要开启不安全的回退。 |
 | `handshake-timeout` | 18s 内没完成安全握手（含 hbbr 首腿配对等待）：对端未配对、relay 不通、反代缓冲/超时 | 查 21119、hbbr 日志、反代超时/缓冲；对端是否在线。hbbr 服务端可能等 30s，但客户端 18s 就会放弃。 |
 | `login-timeout` | 60s 内未拿到 peer_info | 对端是否等待接受；2FA；密码；反代是否断开。 |
@@ -100,9 +102,13 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 - 对端“No Password Access”/点击接受：本库无密码时不会发送空密码 LoginRequest，
   需要输入任意密码才能继续（已知限制）。
 - 2FA 无内置 UI；`two-factor-required` 需在对端完成。
+- `passwordHash` 是 32 字节 h1 的 base64（`SHA256(password || salt)`），不是明文；
+  库只计算 `SHA256(h1 || challenge)`，不会还原密码。salt 不匹配时状态 detail 为
+  `Password hash salt mismatch`；retry hash 的 salt 不匹配会抛 `invalid-config`。
+- h1 仍是 bearer credential；salt 公开且密码弱时可离线猜测，按密码级别保管。
 - 只读：viewer 显示 “View only” 并禁用输入；`readOnly` 也阻止入站剪贴板。
   对端撤销键盘权限时鼠标/触摸也会禁用（上游 host 语义）。
-- 不要把密码写进 URL/localStorage/日志；排查时只记录错误码/状态。
+- 不要把密码/h1/serverKey 写进 URL/localStorage/日志；排查时只记录错误码/状态。
 
 ## 输入/移动端
 

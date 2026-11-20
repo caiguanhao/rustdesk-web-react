@@ -52,8 +52,14 @@ import {
   ClipboardController,
   type RemoteClipboardEvent,
 } from '../input/clipboard.js';
-import { RustDeskError } from './errors.js';
-import type { RustDeskSessionConfig } from './options.js';
+import { RustDeskError, isAbortError } from './errors.js';
+import type {
+  RustDeskPasswordCredential,
+  RustDeskSessionConfig,
+} from './options.js';
+import { resolveConfiguredPassword } from './credentials.js';
+import { isPromiseLike } from './promise.js';
+import { resolveServerKey } from './server-key.js';
 import {
   applyDisplayList,
   isDisplayIndex,
@@ -121,10 +127,6 @@ function invalidState(action: string): RustDeskError {
     'invalid-state',
     `Cannot ${action} in the current session state`,
   );
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof RustDeskError && error.code === 'aborted';
 }
 
 export class RustDeskSession {
@@ -258,10 +260,19 @@ export class RustDeskSession {
     this.lifecycle = lifecycle;
     const unlink = this.linkAbort(signal, lifecycle);
     try {
+      const password = resolveConfiguredPassword(this.config);
+      // Keep the static-key/sync-provider path synchronous so an immediate
+      // dispose still closes a connection opened by the first connect attempt.
+      const resolvedKey = resolveServerKey(this.config, lifecycle.signal);
+      const serverKey = isPromiseLike(resolvedKey)
+        ? await resolvedKey
+        : resolvedKey;
+      if (lifecycle.signal.aborted || !this.isRun(runId)) throw abortError();
+
       const connection = await (this.deps.connectRelay ?? connectRelay)({
         server: this.config.server,
         peerId: this.config.id,
-        serverKey: this.config.serverKey,
+        serverKey,
         relayServer: this.config.relayServer,
         rendezvousUrl: this.config.rendezvousUrl,
         relayUrl: this.config.relayUrl,
@@ -291,7 +302,7 @@ export class RustDeskSession {
 
       const flow = new LoginFlow(connection, {
         peerId: this.config.id,
-        password: this.config.password,
+        initialCredential: password,
         imageQuality: this.config.imageQuality,
         advertiseWebClientVersion: this.config.advertiseWebClientVersion,
         disableClipboard:
@@ -322,7 +333,7 @@ export class RustDeskSession {
     } catch (error) {
       const typed = this.toError(error, 'Connection failed');
       if (this.isRun(runId)) {
-        if (isAbort(typed)) this.endDisconnected('Connection aborted');
+        if (isAbortError(typed)) this.endDisconnected('Connection aborted');
         else this.fail(typed, runId);
       }
       throw typed;
@@ -335,7 +346,7 @@ export class RustDeskSession {
    * Retry after `password-required` using the same Hash. Returns the pending
    * `connect()` result (or a rejected promise when called in another state).
    */
-  login(password: string): Promise<PeerInfo> {
+  login(credential: RustDeskPasswordCredential): Promise<PeerInfo> {
     if (this.disposed) return Promise.reject(abortError());
     if (!this.flow || !this.loginPromise) {
       return Promise.reject(invalidState('log in'));
@@ -345,7 +356,7 @@ export class RustDeskSession {
     }
     try {
       this.passwordRequiredValue = false;
-      this.flow.login(password);
+      this.flow.login(credential);
     } catch (error) {
       this.passwordRequiredValue = true;
       return Promise.reject(error);
@@ -511,7 +522,7 @@ export class RustDeskSession {
           );
           return;
         }
-        if (isAbort(error)) {
+        if (isAbortError(error)) {
           this.endDisconnected('Connection aborted');
           return;
         }
@@ -755,7 +766,7 @@ export class RustDeskSession {
 
   private fail(error: unknown, runId: number): void {
     if (!this.isRun(runId)) return;
-    if (isAbort(error)) {
+    if (isAbortError(error)) {
       this.endDisconnected('Connection aborted');
       return;
     }

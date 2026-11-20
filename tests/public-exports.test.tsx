@@ -11,10 +11,19 @@ import * as root from '../src/index';
 import * as core from '../src/core';
 import type {
   PeerInfo,
+  RustDeskPasswordCredential,
+  RustDeskPasswordHash,
+  RustDeskPasswordHashInput,
+  RustDeskServerKeyProvider,
+  RustDeskServerKeyVerifier,
   RustDeskSessionConfig,
   RustDeskViewerProps,
   RustDeskViewerRef,
 } from '../src/index';
+import type {
+  RustDeskPasswordCredential as CoreCredential,
+  RustDeskSessionConfig as CoreConfig,
+} from '../src/core';
 
 // P0-4 acceptance: both entries expose a usable API surface and the React
 // shell renders with host styling. P4-3 replaces the fail-loud ref stubs with
@@ -87,6 +96,33 @@ describe('public exports', () => {
     expect(error.name).toBe('RustDeskError');
     expect(error.code).toBe('connection-lost');
     expect(error.cause).toBe(cause);
+  });
+
+  it('types pre-hashed credentials and runtime server-key sources', () => {
+    const hash: RustDeskPasswordHash = { hash: 'base64', salt: 'salt' };
+    const input: RustDeskPasswordHashInput = hash;
+    const credential: RustDeskPasswordCredential = 'secret';
+    const coreCredential: CoreCredential = hash;
+    const provider: RustDeskServerKeyProvider = async () => 'base64-key';
+    const verifier: RustDeskServerKeyVerifier = {
+      publicKey: 'public-key',
+      verifier: 'signed-message',
+    };
+    const withOptions: RustDeskSessionConfig = {
+      ...config,
+      password: undefined,
+      passwordHash: input,
+      serverKeyProvider: provider,
+      serverKeyVerifier: verifier,
+    };
+    const coreConfig: CoreConfig = withOptions;
+
+    expect(withOptions.passwordHash).toBe(hash);
+    expect(withOptions.serverKeyProvider).toBe(provider);
+    expect(withOptions.serverKeyVerifier).toBe(verifier);
+    expect(credential).toBe('secret');
+    expect(coreCredential).toBe(hash);
+    expect(coreConfig).toBe(withOptions);
   });
 
   it('types the normalized PeerInfo shape', () => {

@@ -30,11 +30,22 @@ export function hashPassword(password: string, salt: string): Uint8Array {
   return sha256Concat([password, salt]);
 }
 
-/** `SHA256(h1 || UTF8(challenge))`, the bytes sent in `LoginRequest.password`. */
+/**
+ * `SHA256(h1 || UTF8(challenge))`, the bytes sent in `LoginRequest.password`.
+ * Used when the host supplied a pre-hashed h1 instead of plaintext.
+ */
+export function challengeResponseFromHash(
+  h1: Uint8Array,
+  challenge: string,
+): Uint8Array {
+  return sha256Concat([h1, challenge]);
+}
+
+/** `SHA256(h1 || UTF8(challenge))` for a plaintext password. */
 export function challengeResponse(
   password: string,
   salt: string,
   challenge: string,
 ): Uint8Array {
-  return sha256Concat([hashPassword(password, salt), challenge]);
+  return challengeResponseFromHash(hashPassword(password, salt), challenge);
 }

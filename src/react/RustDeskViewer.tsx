@@ -43,9 +43,13 @@ import { MouseInput } from '../input/mouse.js';
 import { TouchInput, type LocalZoomState } from '../input/touch.js';
 import { VideoRenderer } from '../media/renderer.js';
 import { RustDeskError } from '../session/errors.js';
-import type { RustDeskSessionConfig } from '../session/options.js';
+import type {
+  RustDeskPasswordCredential,
+  RustDeskSessionConfig,
+} from '../session/options.js';
 import type { PeerInfo } from '../session/peer-info.js';
 import { applyInputPolicy } from '../session/permissions.js';
+import { isPromiseLike } from '../session/promise.js';
 import {
   isActiveStatus,
   type RustDeskStatusEvent,
@@ -128,12 +132,16 @@ export interface RustDeskViewerProps extends RustDeskSessionConfig {
   labels?: Partial<RustDeskViewerLabels>;
   onStatusChange?: (event: RustDeskStatusEvent) => void;
   /**
-   * Return a password to log in automatically; return undefined to show the
-   * built-in password form. Invoked again with `retry: true` after a rejection.
+   * Return a credential to log in automatically; return undefined to show the
+   * built-in password form. A string is plaintext; `{ hash, salt? }` is a
+   * pre-hashed h1. Invoked again with `retry: true` after a rejection.
    */
   onPasswordRequired?: (
     prompt: PasswordPrompt,
-  ) => string | undefined | Promise<string | undefined>;
+  ) =>
+    | RustDeskPasswordCredential
+    | undefined
+    | Promise<RustDeskPasswordCredential | undefined>;
   onError?: (error: RustDeskError) => void;
   /** Remote clipboard text, already decompressed. */
   onClipboard?: (text: string) => void;
@@ -148,7 +156,7 @@ export interface RustDeskViewerProps extends RustDeskSessionConfig {
 /** Imperative commands exposed through `ref`. */
 export interface RustDeskViewerRef {
   /** Connect (or reconnect) and resolve once `peer_info` arrives. */
-  connect(password?: string): Promise<PeerInfo>;
+  connect(credential?: RustDeskPasswordCredential): Promise<PeerInfo>;
   disconnect(): void;
   sendCtrlAltDel(): void;
   setFullscreen(enabled: boolean): Promise<void>;
@@ -560,7 +568,10 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
         return;
       }
       let cancelled = false;
-      let result: string | undefined | Promise<string | undefined>;
+      let result:
+        | RustDeskPasswordCredential
+        | undefined
+        | Promise<RustDeskPasswordCredential | undefined>;
       try {
         result = handler({
           retry: statusEvent.retry,
@@ -570,24 +581,24 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
         setShowPassword(true);
         return;
       }
-      const logIn = (password: string | undefined): void => {
+      const logIn = (credential: RustDeskPasswordCredential | undefined): void => {
         if (cancelled) return;
-        if (!password) {
+        if (credential === undefined || credential === null || credential === '') {
           setShowPassword(true);
           return;
         }
         setShowPassword(false);
-        void login(password).catch(() => {
+        void login(credential).catch(() => {
           if (!cancelled) setShowPassword(true);
         });
       };
-      if (result === undefined || typeof result === 'string') {
+      if (!isPromiseLike(result)) {
         logIn(result);
         return;
       }
       setShowPassword(false);
       void result.then(
-        (password) => logIn(password),
+        (credential) => logIn(credential),
         () => {
           if (!cancelled) setShowPassword(true);
         },
@@ -702,7 +713,8 @@ export const RustDeskViewer = forwardRef<RustDeskViewerRef, RustDeskViewerProps>
     useImperativeHandle(
       ref,
       () => ({
-        connect: (password?: string) => connect(password),
+        connect: (credential?: RustDeskPasswordCredential) =>
+          connect(credential),
         disconnect: handleDisconnect,
         sendCtrlAltDel,
         setFullscreen: setFullscreenEnabled,

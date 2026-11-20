@@ -20,9 +20,17 @@
  */
 import * as message from './message.js';
 import type { RelayConnection } from './connection.js';
-import { challengeResponse } from '../crypto/password.js';
+import { challengeResponse, challengeResponseFromHash } from '../crypto/password.js';
 import { RustDeskError } from '../session/errors.js';
-import type { ImageQuality } from '../session/options.js';
+import {
+  PASSWORD_SALT_MISMATCH_DETAIL,
+  normalizePasswordCredential,
+  type NormalizedPasswordCredential,
+} from '../session/credentials.js';
+import type {
+  ImageQuality,
+  RustDeskPasswordCredential,
+} from '../session/options.js';
 import { clampDisplayIndex, type PeerInfo } from '../session/peer-info.js';
 import {
   permissionNameFromWire,
@@ -42,8 +50,13 @@ export type LoginChannel = Pick<RelayConnection, 'sendMessage' | 'nextMessage'>;
 
 export interface LoginFlowOptions {
   peerId: string;
-  /** Initial password; omit to be told through the `password-required` status. */
-  password?: string;
+  /**
+   * Initial credential; omit to be told through the `password-required` status.
+   * A bare string is plaintext, an object is a pre-hashed h1.
+   */
+  password?: RustDeskPasswordCredential;
+  /** Internal: pre-normalized config credential (avoids a second decode). */
+  initialCredential?: NormalizedPasswordCredential;
   imageQuality?: ImageQuality;
   /** Send the official 1.3.7 version/my_platform fields (default false). */
   advertiseWebClientVersion?: boolean;
@@ -119,7 +132,7 @@ export class LoginFlow {
   private readonly channel: LoginChannel;
   private readonly pending: message.Message[] = [];
   private hash: message.Hash | undefined;
-  private initialPassword: string | undefined;
+  private initialCredential: NormalizedPasswordCredential | undefined;
   private started = false;
   private settled = false;
   private approvalTimer: ReturnType<typeof setTimeout> | undefined;
@@ -132,14 +145,22 @@ export class LoginFlow {
 
   /**
    * Begin waiting for Hash and login responses. Resolves only with peer_info;
-   * if no password is supplied, emits `password-required` and stays pending
-   * until `login(password)` is called.
+   * if no credential is supplied, emits `password-required` and stays pending
+   * until `login(credential)` is called.
    */
-  start(password: string | undefined = this.options.password, signal?: AbortSignal): Promise<PeerInfo> {
+  start(
+    credential?: RustDeskPasswordCredential,
+    signal?: AbortSignal,
+  ): Promise<PeerInfo> {
     if (this.started) throw new RustDeskError('protocol-error', 'Login already started');
     if (this.settled) throw new RustDeskError('aborted', 'Login flow is closed');
+    const initial =
+      credential !== undefined
+        ? normalizePasswordCredential(credential)
+        : this.options.initialCredential ??
+          normalizePasswordCredential(this.options.password);
     this.started = true;
-    if (password) this.initialPassword = password;
+    if (initial) this.initialCredential = initial;
 
     const timeoutMs = this.options.loginTimeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
@@ -152,14 +173,19 @@ export class LoginFlow {
   }
 
   /**
-   * Retry the login with a new password using the already received Hash.
+   * Retry the login with a new credential using the already received Hash.
    * Call only after a `password-required` status.
    */
-  login(password: string): void {
+  login(credential: RustDeskPasswordCredential): void {
     if (this.settled) throw new RustDeskError('aborted', 'Login flow is closed');
-    if (!password) {
+    const normalized = normalizePasswordCredential(credential);
+    if (!normalized) {
       this.emitPasswordRequired(false, 'Password required');
       return;
+    }
+    const password = this.prepareLogin(normalized);
+    if (!password) {
+      throw new RustDeskError('invalid-config', PASSWORD_SALT_MISMATCH_DETAIL);
     }
     this.sendLogin(password);
   }
@@ -200,7 +226,7 @@ export class LoginFlow {
       throw error;
     } finally {
       this.cleanup();
-      this.initialPassword = undefined;
+      this.initialCredential = undefined;
     }
   }
 
@@ -211,10 +237,12 @@ export class LoginFlow {
     }
     if (msg.hash) {
       this.hash = msg.hash;
-      if (this.initialPassword) {
-        const password = this.initialPassword;
-        this.initialPassword = undefined;
-        this.sendLogin(password);
+      if (this.initialCredential) {
+        const credential = this.initialCredential;
+        this.initialCredential = undefined;
+        const password = this.prepareLogin(credential);
+        if (password) this.sendLogin(password);
+        else this.emitPasswordRequired(false, PASSWORD_SALT_MISMATCH_DETAIL);
       } else {
         this.emitPasswordRequired(false);
       }
@@ -274,10 +302,31 @@ export class LoginFlow {
     }
   }
 
-  private sendLogin(password: string): void {
+  /**
+   * Validate the credential against the current Hash and compute the wire
+   * password. Returns undefined when a configured salt does not match; the
+   * caller decides whether that becomes a prompt (initial) or an error (retry).
+   */
+  private prepareLogin(
+    credential: NormalizedPasswordCredential,
+  ): Uint8Array | undefined {
     const hash = this.hash;
     if (!hash) throw new RustDeskError('protocol-error', 'Cannot log in before receiving Hash');
 
+    if (
+      credential.kind === 'hash' &&
+      credential.salt !== undefined &&
+      credential.salt !== hash.salt
+    ) {
+      return undefined;
+    }
+
+    return credential.kind === 'hash'
+      ? challengeResponseFromHash(credential.h1, hash.challenge)
+      : challengeResponse(credential.password, hash.salt, hash.challenge);
+  }
+
+  private sendLogin(password: Uint8Array): void {
     const advertise = this.options.advertiseWebClientVersion ?? false;
     const option = message.OptionMessage.fromPartial({
       image_quality: IMAGE_QUALITY[this.options.imageQuality ?? 'balanced'],
@@ -292,7 +341,7 @@ export class LoginFlow {
         username: this.options.peerId,
         my_id: 'web',
         my_name: 'web',
-        password: challengeResponse(password, hash.salt, hash.challenge),
+        password,
         option,
         video_ack_required: true,
         version: advertise ? WEB_CLIENT_VERSION : '',

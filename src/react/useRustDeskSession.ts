@@ -19,7 +19,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RemoteClipboardEvent } from '../input/clipboard.js';
 import { RustDeskError } from '../session/errors.js';
-import type { RustDeskSessionConfig } from '../session/options.js';
+import type {
+  RustDeskPasswordCredential,
+  RustDeskSessionConfig,
+} from '../session/options.js';
 import type { PeerInfo } from '../session/peer-info.js';
 import type { PermissionEvent } from '../session/permissions.js';
 import {
@@ -31,7 +34,11 @@ import type { RustDeskStatus, RustDeskStatusEvent } from '../session/state.js';
 export interface UseRustDeskSessionOptions {
   /** Connect as soon as the session is created. Defaults to true. */
   autoConnect?: boolean;
-  /** Test seam; must be stable across renders. Defaults to RustDeskSession. */
+  /**
+   * Test seam; must be stable across renders. Defaults to RustDeskSession.
+   * Receives a shallow copy of the config with a stable `serverKeyProvider`
+   * wrapper that reads the latest prop, not the original function reference.
+   */
   createSession?: (config: RustDeskSessionConfig) => RustDeskSession;
   onStatusChange?: (event: RustDeskStatusEvent) => void;
   onError?: (error: RustDeskError) => void;
@@ -53,11 +60,11 @@ export interface UseRustDeskSessionResult {
   securityDowngrade?: RustDeskError;
   /**
    * Connect the current session; returns an in-flight attempt if present.
-   * A password is used when the session is already `password-required`.
+   * A credential is used when the session is already `password-required`.
    */
-  connect(password?: string): Promise<PeerInfo>;
+  connect(credential?: RustDeskPasswordCredential): Promise<PeerInfo>;
   /** Retry after `password-required` on the same Hash. */
-  login(password: string): Promise<PeerInfo>;
+  login(credential: RustDeskPasswordCredential): Promise<PeerInfo>;
   /** Clean local disconnect; the hook/session can connect again. */
   disconnect(): void;
 }
@@ -91,33 +98,39 @@ export function useRustDeskSession(
   const sessionRef = useRef<RustDeskSession | null>(null);
   const connectPromiseRef = useRef<Promise<PeerInfo> | undefined>();
 
-  const connect = useCallback((password?: string): Promise<PeerInfo> => {
-    const target = sessionRef.current;
-    if (!target) {
-      return Promise.reject(invalidState('The session is not mounted yet'));
-    }
-    if (password !== undefined && target.status === 'password-required') {
-      return target.login(password);
-    }
-    if (connectPromiseRef.current) return connectPromiseRef.current;
-    const promise = target.connect();
-    connectPromiseRef.current = promise;
-    const clear = (): void => {
-      if (connectPromiseRef.current === promise) {
-        connectPromiseRef.current = undefined;
+  const connect = useCallback(
+    (credential?: RustDeskPasswordCredential): Promise<PeerInfo> => {
+      const target = sessionRef.current;
+      if (!target) {
+        return Promise.reject(invalidState('The session is not mounted yet'));
       }
-    };
-    void promise.then(clear, clear);
-    return promise;
-  }, []);
+      if (credential !== undefined && target.status === 'password-required') {
+        return target.login(credential);
+      }
+      if (connectPromiseRef.current) return connectPromiseRef.current;
+      const promise = target.connect();
+      connectPromiseRef.current = promise;
+      const clear = (): void => {
+        if (connectPromiseRef.current === promise) {
+          connectPromiseRef.current = undefined;
+        }
+      };
+      void promise.then(clear, clear);
+      return promise;
+    },
+    [],
+  );
 
-  const login = useCallback((password: string): Promise<PeerInfo> => {
-    const target = sessionRef.current;
-    if (!target) {
-      return Promise.reject(invalidState('The session is not mounted yet'));
-    }
-    return target.login(password);
-  }, []);
+  const login = useCallback(
+    (credential: RustDeskPasswordCredential): Promise<PeerInfo> => {
+      const target = sessionRef.current;
+      if (!target) {
+        return Promise.reject(invalidState('The session is not mounted yet'));
+      }
+      return target.login(credential);
+    },
+    [],
+  );
 
   const disconnect = useCallback((): void => {
     sessionRef.current?.disconnect();
@@ -127,8 +140,10 @@ export function useRustDeskSession(
   const {
     server,
     serverKey,
+    serverKeyVerifier,
     id,
     password,
+    passwordHash,
     relayServer,
     rendezvousUrl,
     relayUrl,
@@ -140,11 +155,26 @@ export function useRustDeskSession(
     advertiseWebClientVersion,
   } = config;
 
+  const passwordHashValue =
+    typeof passwordHash === 'string' ? passwordHash : passwordHash?.hash;
+  const passwordHashSalt =
+    typeof passwordHash === 'string' ? undefined : passwordHash?.salt;
+  const verifierPublicKey = serverKeyVerifier?.publicKey;
+  const verifierValue = serverKeyVerifier?.verifier;
+
+  // Keep provider calls on the latest prop without recreating the session for
+  // every inline function. The wrapper closes over the ref, not its value.
+  const latestServerKeyProvider = useRef(config.serverKeyProvider);
+  latestServerKeyProvider.current = config.serverKeyProvider;
+
   useEffect(() => {
     const currentOptions = optionsRef.current;
     const create =
       currentOptions.createSession ?? ((value) => new RustDeskSession(value));
-    const created = create(config);
+    const created = create({
+      ...config,
+      serverKeyProvider: () => latestServerKeyProvider.current?.(),
+    });
     sessionRef.current = created;
     setSession(created);
     setStatusEvent(IDLE_STATUS);
@@ -211,6 +241,10 @@ export function useRustDeskSession(
     serverKey,
     id,
     password,
+    passwordHashValue,
+    passwordHashSalt,
+    verifierPublicKey,
+    verifierValue,
     relayServer,
     rendezvousUrl,
     relayUrl,

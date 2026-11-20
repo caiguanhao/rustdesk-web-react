@@ -1,14 +1,22 @@
 /**
  * P4-4 demo: the embeddable viewer behind a small connection form.
  *
- * Non-password fields are remembered in localStorage; the password is kept in
- * React state only and never written to storage or logs. `VITE_RD_PASSWORD`
- * may prefill it for local development (gitignored `.env.local`), but the
- * demo still never persists it. Submitting mounts a fresh <RustDeskViewer>
+ * Non-credential fields are remembered in localStorage; the password stays in
+ * React state only. Hash mode posts { serverKey, password, salt } to the
+ * dev/preview-only `/api/rustdesk/credential` endpoint, which returns
+ * `{ passwordHash, serverKeyVerifier }` (h1 + a fresh signed envelope). The
+ * fetched credential stays in React state and is shown in read-only fields and
+ * the generated snippet. Submitting mounts a fresh <RustDeskViewer>
  * (lazy-loaded, so the form does not pay for the protocol/renderer graph) with
  * a snapshot of the form; "Change settings" unmounts/disposes it.
  */
-import { lazy, Suspense, useState, type FormEvent } from 'react';
+import {
+  lazy,
+  Suspense,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import type {
   PeerInfo,
   RustDeskSessionConfig,
@@ -20,9 +28,13 @@ const STORAGE_KEY = 'rustdesk-web-react.demo.form.v1';
 /** Mirrors `DEFAULT_ASSET_BASE_URL`; the viewer applies it when empty. */
 const DEFAULT_ASSET_BASE = '/rustdesk-assets/';
 
+type CredentialMode = 'password' | 'hash';
+
 const FIELD_KEYS = [
+  'credentialMode',
   'server',
   'serverKey',
+  'salt',
   'relayServer',
   'id',
   'assetBaseUrl',
@@ -38,12 +50,18 @@ const RustDeskViewer = lazy(() =>
 
 function environmentDefaults(): FormValues {
   return {
+    credentialMode: env.VITE_RD_CREDENTIAL_MODE === 'hash' ? 'hash' : 'password',
     server: env.VITE_RD_SERVER ?? '',
     serverKey: env.VITE_RD_KEY ?? '',
+    salt: env.VITE_RD_SALT ?? '',
     relayServer: env.VITE_RD_RELAY ?? '',
     id: env.VITE_RD_ID ?? '',
     assetBaseUrl: env.VITE_RD_ASSET_BASE ?? '',
   };
+}
+
+function modeFromValue(value: string): CredentialMode {
+  return value === 'hash' ? 'hash' : 'password';
 }
 
 /**
@@ -70,6 +88,7 @@ function loadForm(): FormValues {
       const value = (saved as Record<string, unknown>)[field];
       if (typeof value === 'string') values[field] = value;
     }
+    values.credentialMode = modeFromValue(values.credentialMode);
   } catch {
     // Private mode or a corrupt/old value: fall back to env defaults.
   }
@@ -96,6 +115,63 @@ function normalized(values: FormValues): FormValues {
   ) as FormValues;
 }
 
+interface HashCredential {
+  passwordHash: string;
+  publicKey: string;
+  verifier: string;
+}
+
+function viewerExample(
+  values: FormValues,
+  mode: CredentialMode,
+  hashCredential: HashCredential | null,
+): string {
+  const server = values.server || 'rd.example.com';
+  const id = values.id || '123456789';
+  const lines = [
+    "import { RustDeskViewer } from 'rustdesk-web-react';",
+    '',
+    'export function RemotePanel() {',
+    '  return (',
+    '    <RustDeskViewer',
+    `      server={${JSON.stringify(server)}}`,
+  ];
+
+  if (mode === 'hash') {
+    const publicKey =
+      hashCredential?.publicKey || '<verifier Ed25519 public key>';
+    const verifier =
+      hashCredential?.verifier || '<base64 signature || message>';
+    const passwordHash =
+      hashCredential?.passwordHash ||
+      '<base64 SHA256(password || salt)>';
+    lines.push(
+      '      serverKeyVerifier={{',
+      `        publicKey: ${JSON.stringify(publicKey)},`,
+      `        verifier: ${JSON.stringify(verifier)},`,
+      '      }}',
+      `      passwordHash={${JSON.stringify(passwordHash)}}`,
+    );
+  } else {
+    lines.push(
+      `      serverKey={${JSON.stringify(values.serverKey || '<hbbs base64 public key>')}}`,
+      '      password="<device password>"',
+    );
+  }
+
+  if (values.relayServer) {
+    lines.push(`      relayServer={${JSON.stringify(values.relayServer)}}`);
+  }
+  lines.push(`      id={${JSON.stringify(id)}}`);
+  if (values.assetBaseUrl) {
+    lines.push(
+      `      assetBaseUrl={${JSON.stringify(values.assetBaseUrl)}}`,
+    );
+  }
+  lines.push('      autoConnect', '    />', '  );', '}', '');
+  return lines.join('\n');
+}
+
 function optional(value: string): string | undefined {
   return value === '' ? undefined : value;
 }
@@ -108,6 +184,8 @@ interface DemoFieldProps {
   type?: 'text' | 'password';
   placeholder?: string;
   autoComplete?: string;
+  readOnly?: boolean;
+  hint?: ReactNode;
 }
 
 function DemoField({
@@ -118,6 +196,8 @@ function DemoField({
   type = 'text',
   placeholder,
   autoComplete,
+  readOnly = false,
+  hint,
 }: DemoFieldProps) {
   return (
     <label className="demo-field" htmlFor={id}>
@@ -132,6 +212,45 @@ function DemoField({
         autoCapitalize="none"
         autoCorrect="off"
         spellCheck={false}
+        readOnly={readOnly}
+      />
+      {hint ? <span className="demo-field-hint">{hint}</span> : null}
+    </label>
+  );
+}
+
+interface DemoTextareaProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  readOnly?: boolean;
+}
+
+function DemoTextarea({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+  readOnly = false,
+}: DemoTextareaProps) {
+  return (
+    <label className="demo-field" htmlFor={id}>
+      <span>{label}</span>
+      <textarea
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        readOnly={readOnly}
       />
     </label>
   );
@@ -142,7 +261,12 @@ export function App() {
   const [password, setPassword] = useState(
     () => env.VITE_RD_PASSWORD ?? '',
   );
+  const [hashCredential, setHashCredential] =
+    useState<HashCredential | null>(null);
+  const [hashLoading, setHashLoading] = useState(false);
+  const [hashError, setHashError] = useState<string | null>(null);
   const [active, setActive] = useState<RustDeskSessionConfig | null>(null);
+  const mode = modeFromValue(form.credentialMode);
   const [status, setStatus] = useState<RustDeskStatusEvent>({
     status: 'idle',
   });
@@ -151,36 +275,141 @@ export function App() {
 
   const update = (field: keyof FormValues, value: string): void => {
     setForm((current) => ({ ...current, [field]: value }));
+    setFormError(null);
+    if (field === 'credentialMode') {
+      setHashError(null);
+    }
+    if (field === 'serverKey' || field === 'salt') {
+      setHashCredential(null);
+      setHashError(null);
+    }
+  };
+
+  const updatePassword = (value: string): void => {
+    setPassword(value);
+    setFormError(null);
+    setHashCredential(null);
+    setHashError(null);
+  };
+
+  const prepareHashCredential = async (): Promise<void> => {
+    const values = normalized(form);
+    if (!values.serverKey) {
+      setHashError('Server Key is required to build the verifier.');
+      return;
+    }
+    if (password === '') {
+      setHashError('Enter the device password first.');
+      return;
+    }
+    if (!values.salt) {
+      setHashError(
+        'Password Salt is required. Copy salt = "..." from the controlled ' +
+          "device's RustDesk.toml: macOS " +
+          '~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml; Linux ' +
+          '~/.config/rustdesk/RustDesk.toml (root/service: ' +
+          '/root/.config/rustdesk/RustDesk.toml).',
+      );
+      return;
+    }
+
+    setHashLoading(true);
+    setHashError(null);
+    try {
+      const response = await fetch('/api/rustdesk/credential', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          serverKey: values.serverKey,
+          password,
+          salt: values.salt,
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        passwordHash?: string;
+        serverKeyVerifier?: { publicKey?: string; verifier?: string };
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      if (
+        !payload.passwordHash ||
+        !payload.serverKeyVerifier?.publicKey ||
+        !payload.serverKeyVerifier.verifier
+      ) {
+        throw new Error('The demo API returned an incomplete credential.');
+      }
+      setHashCredential({
+        passwordHash: payload.passwordHash,
+        publicKey: payload.serverKeyVerifier.publicKey,
+        verifier: payload.serverKeyVerifier.verifier,
+      });
+      setForm(values);
+      saveForm(values);
+    } catch (error) {
+      setHashCredential(null);
+      setHashError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setHashLoading(false);
+    }
   };
 
   const connect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const values = normalized(form);
+    const selectedMode = modeFromValue(values.credentialMode);
     if (!values.server || !values.id) {
       setFormError('Server and Device ID are required.');
+      return;
+    }
+    if (selectedMode === 'hash' && !hashCredential) {
+      setFormError(
+        'Click "Get passwordHash + serverKeyVerifier" first.',
+      );
       return;
     }
     saveForm(values);
     setForm(values);
     setFormError(null);
+    setHashError(null);
     setStatus({ status: 'connecting' });
     setPeerInfo(null);
     const decoderSimd = decoderSimdFromUrl();
-    setActive({
+    const base = {
       server: values.server,
-      serverKey: optional(values.serverKey),
       relayServer: optional(values.relayServer),
       id: values.id,
-      password: password === '' ? undefined : password,
       assetBaseUrl: optional(values.assetBaseUrl),
       ...(decoderSimd === undefined ? {} : { decoderSimd }),
-    });
-    // The viewer's config snapshot keeps the password; the form does not.
+    };
+    setActive(
+      selectedMode === 'hash'
+        ? {
+            ...base,
+            serverKeyVerifier: {
+              publicKey: hashCredential!.publicKey,
+              verifier: hashCredential!.verifier,
+            },
+            passwordHash: hashCredential!.passwordHash,
+          }
+        : {
+            ...base,
+            serverKey: optional(values.serverKey),
+            password: password === '' ? undefined : password,
+          },
+    );
+    // The viewer's config snapshot keeps the credential; the form does not.
     setPassword('');
   };
 
   const closeViewer = (): void => {
     setActive(null);
+    setHashCredential(null);
+    setHashError(null);
+    setPassword('');
   };
 
   return (
@@ -224,6 +453,21 @@ export function App() {
         </section>
       ) : (
         <form className="demo-form" onSubmit={connect}>
+          <label className="demo-field" htmlFor="rd-credential-mode">
+            <span>Credential mode</span>
+            <select
+              id="rd-credential-mode"
+              value={form.credentialMode}
+              onChange={(event) =>
+                update('credentialMode', event.target.value)
+              }
+            >
+              <option value="password">Plaintext password</option>
+              <option value="hash">
+                passwordHash + serverKeyVerifier
+              </option>
+            </select>
+          </label>
           <DemoField
             id="rd-server"
             label="Server (host:port)"
@@ -233,10 +477,95 @@ export function App() {
           />
           <DemoField
             id="rd-server-key"
-            label="Server Key (hbbs public key, base64; self-hosted)"
+            label={
+              mode === 'password'
+                ? 'Server Key (hbbs public key, base64; self-hosted)'
+                : 'Server Key (hbbs public key; the demo API signs it into the verifier)'
+            }
             value={form.serverKey}
             onChange={(value) => update('serverKey', value)}
           />
+          <DemoField
+            id="rd-password"
+            label={
+              mode === 'password'
+                ? 'Password (leave empty to use the viewer prompt; not saved)'
+                : 'Password (sent to the demo API to build h1; not saved)'
+            }
+            value={password}
+            onChange={updatePassword}
+            type="password"
+            autoComplete="off"
+          />
+          {mode === 'hash' ? (
+            <>
+              <DemoField
+                id="rd-salt"
+                label="Password Salt (peer Hash.salt; used to build h1)"
+                value={form.salt}
+                onChange={(value) => update('salt', value)}
+                hint={
+                  <>
+                    On the controlled device, copy <code>salt = "..."</code>{' '}
+                    from <code>RustDesk.toml</code>. macOS:{' '}
+                    <code>
+                      ~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml
+                    </code>
+                    ; Linux: <code>~/.config/rustdesk/RustDesk.toml</code>{' '}
+                    (root/service:{' '}
+                    <code>/root/.config/rustdesk/RustDesk.toml</code>).
+                  </>
+                }
+              />
+              <div className="demo-actions">
+                <button
+                  id="rd-get-credential"
+                  type="button"
+                  className="demo-button secondary"
+                  onClick={() => void prepareHashCredential()}
+                  disabled={hashLoading}
+                >
+                  {hashLoading
+                    ? 'Preparing…'
+                    : 'Get passwordHash + serverKeyVerifier'}
+                </button>
+                <span className="demo-note">
+                  Calls the local demo API with the password; nothing is
+                  persisted.
+                </span>
+              </div>
+              {hashError ? (
+                <p className="demo-error" role="alert">
+                  {hashError}
+                </p>
+              ) : null}
+              <DemoField
+                id="rd-password-hash"
+                label="Password Hash (returned by the demo API)"
+                value={hashCredential?.passwordHash ?? ''}
+                onChange={() => {}}
+                readOnly
+                placeholder="Fetched from /api/rustdesk/credential"
+              />
+              <DemoField
+                id="rd-verifier-public-key"
+                label="Verifier Public Key (returned by the demo API)"
+                value={hashCredential?.publicKey ?? ''}
+                onChange={() => {}}
+                readOnly
+                placeholder="Fetched from /api/rustdesk/credential"
+              />
+              <DemoTextarea
+                id="rd-verifier"
+                label="Verifier (returned by the demo API; contains the server key)"
+                value={hashCredential?.verifier ?? ''}
+                onChange={() => {}}
+                readOnly
+                rows={3}
+                placeholder="Fetched from /api/rustdesk/credential"
+              />
+            </>
+          ) : null}
           <DemoField
             id="rd-relay"
             label="Relay Server (optional)"
@@ -249,14 +578,6 @@ export function App() {
             label="Device ID"
             value={form.id}
             onChange={(value) => update('id', value)}
-          />
-          <DemoField
-            id="rd-password"
-            label="Password (leave empty to use the viewer prompt; not saved)"
-            value={password}
-            onChange={setPassword}
-            type="password"
-            autoComplete="off"
           />
           <DemoField
             id="rd-asset-base"
@@ -277,12 +598,24 @@ export function App() {
               Connect
             </button>
             <span className="demo-note">
-              Non-password fields are remembered in this browser. The password
-              is never stored.
+              Non-credential fields are remembered in this browser. The
+              password and fetched hash/verifier are never stored.
             </span>
           </div>
         </form>
       )}
+
+      <section className="demo-code-panel">
+        <h2>Example: &lt;RustDeskViewer /&gt;</h2>
+        <pre className="demo-code">
+          <code>{viewerExample(form, mode, hashCredential)}</code>
+        </pre>
+        <p className="demo-note">
+          The password stays a placeholder. After “Get passwordHash +
+          serverKeyVerifier”, hash mode shows the fetched values in the snippet;
+          treat that snippet as a credential and do not share it.
+        </p>
+      </section>
     </main>
   );
 }

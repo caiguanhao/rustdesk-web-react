@@ -82,3 +82,8 @@ export class RustDeskError extends Error {
     this.code = code;
   }
 }
+
+/** True for `RustDeskError('aborted')` (dispose/AbortSignal). */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof RustDeskError && error.code === 'aborted';
+}

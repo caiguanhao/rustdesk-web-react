@@ -16,7 +16,15 @@ export type { AssetUrlErrorReason, OgvRuntimeFile } from './assets.js';
 
 export { RustDeskError } from './session/errors.js';
 export type { RustDeskErrorCode } from './session/errors.js';
-export type { ImageQuality, RustDeskSessionConfig } from './session/options.js';
+export type {
+  ImageQuality,
+  RustDeskPasswordCredential,
+  RustDeskPasswordHash,
+  RustDeskPasswordHashInput,
+  RustDeskServerKeyProvider,
+  RustDeskServerKeyVerifier,
+  RustDeskSessionConfig,
+} from './session/options.js';
 export type { DisplayInfo, PeerInfo } from './session/peer-info.js';
 export type {
   RustDeskStatus,

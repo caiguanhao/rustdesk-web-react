@@ -254,6 +254,21 @@ Content-Security-Policy:
   分发或提交。缺失/不匹配时默认 fail-closed（`server-key-missing`/
   `server-key-invalid`）；`allowInsecureFallback=true` 才会降级为明文并发出
   `securityDowngraded`，仅用于兼容旧对端/调试。
+- 运行时下发 server key：推荐由认证的同源 HTTPS API 返回，并通过
+  `serverKeyProvider` 在每次 `connect()` 前获取；也可用官方 web client verifier
+  格式的 `serverKeyVerifier`（`{ publicKey, verifier }`）。优先级是 provider 非空结果 →
+  verifier → 静态 `serverKey`。provider 抛错以 `server-key-missing` 结束，
+  verifier 无效以 `server-key-invalid` 结束，均 fail-closed，不受
+  `allowInsecureFallback` 影响。
+- `serverKeyVerifier` 的 payload 是 `signature || "1000::<serverKey>"`：`crypto_sign_open`
+  验签后返回明文 key。它只提供完整性，不提供机密性；base64 解码后跳过 64 字节
+  签名也能直接读到 key。`publicKey` 只有独立 pin/trust 时才是信任锚；与 verifier
+  由同一认证响应下发时只是编码格式。需要浏览器完全接触不到 key 时，必须把
+  rendezvous/relay/handshake 放到服务端网关。
+- 预哈希密码：后台计算 `h1 = base64(SHA256(UTF8(password) || UTF8(salt)))`，通过
+  `passwordHash`（字符串或 `{ hash, salt }`）传入；库只计算
+  `SHA256(h1 || challenge)`，不会还原明文。h1 是 bearer credential，salt 公开且
+  密码弱时可离线猜测；不要写日志、localStorage 或 URL。
 - 密码只在内存中；不要写日志、localStorage 或 URL。后台应从自己的权限系统取出
   设备密码并作为 prop 传入，或使用 viewer 的密码表单/`onPasswordRequired`。
 - `readOnly` 在本地阻止所有输入与入站剪贴板；`disableClipboard` 只关剪贴板。

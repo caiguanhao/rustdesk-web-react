@@ -79,11 +79,13 @@ function abortError(): RustDeskError {
   return new RustDeskError('aborted', 'Connection attempt aborted');
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
+/** Shared by the rendezvous/relay legs and the server-key resolver. */
+export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
 }
 
-function raceAbort<T>(
+/** Shared by the rendezvous/relay legs and the server-key resolver. */
+export function raceAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
   onAbort?: () => void,

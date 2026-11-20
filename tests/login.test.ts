@@ -7,7 +7,10 @@ import {
   WEB_CLIENT_VERSION,
   type LoginFlowOptions,
 } from '../src/protocol/login';
+import { PASSWORD_SALT_MISMATCH_DETAIL } from '../src/session/credentials';
+import { RustDeskError } from '../src/session/errors';
 import type { PermissionChange } from '../src/session/permissions';
+import { h1Base64 } from './mocks/credentials';
 import * as message from '../src/protocol/message';
 import type { DeepPartial } from '../src/protocol/message';
 import { WebSock, type WebSocketLike } from '../src/protocol/websock';
@@ -200,6 +203,24 @@ const PEER_INFO: DeepPartial<message.PeerInfo> = {
 
 const hash = { salt: SALT, challenge: CHALLENGE };
 
+const H1_SECRET = h1Base64('secret', SALT);
+
+function expectInvalidConfig(run: () => unknown): void {
+  try {
+    run();
+    expect.unreachable('expected invalid-config');
+  } catch (error) {
+    expect(error).toBeInstanceOf(RustDeskError);
+    expect((error as RustDeskError).code).toBe('invalid-config');
+  }
+}
+
+async function expectNoLoginRequest(harness: Harness): Promise<void> {
+  await expect(
+    harness.next((msg) => Boolean(msg.login_request), 100),
+  ).rejects.toThrow('peer message timeout');
+}
+
 describe('login flow', () => {
   it('sends the minimal LoginRequest, echoes TestDelay, reports permission and peer_info', async () => {
     await withHarness(async (harness) => {
@@ -343,6 +364,124 @@ describe('login flow', () => {
 
       harness.send({ login_response: { peer_info: PEER_INFO } });
       await expect(infoPromise).resolves.toMatchObject({ username: 'alice' });
+    });
+  });
+
+  it('logs in with a pre-hashed h1 without a plaintext password', async () => {
+    await withHarness(async (harness) => {
+      const tracker = trackStatuses();
+      harness.send({ hash });
+      const flow = harness.makeFlow(
+        options({
+          password: { hash: H1_SECRET, salt: SALT },
+          onStatus: tracker.onStatus,
+        }),
+      );
+      const requestPromise = harness.next((msg) => Boolean(msg.login_request));
+      const infoPromise = flow.start();
+      const request = (await requestPromise).login_request!;
+      expect(Array.from(request.password)).toEqual(
+        Array.from(challengeResponse('secret', SALT, CHALLENGE)),
+      );
+      expect(
+        tracker.events.some((event) => event.status === 'password-required'),
+      ).toBe(false);
+
+      harness.send({ login_response: { peer_info: PEER_INFO } });
+      await expect(infoPromise).resolves.toMatchObject({ username: 'alice' });
+    });
+  });
+
+  it('accepts a hash object without salt', async () => {
+    await withHarness(async (harness) => {
+      harness.send({ hash });
+      const flow = harness.makeFlow(options({ password: { hash: H1_SECRET } }));
+      const requestPromise = harness.next((msg) => Boolean(msg.login_request));
+      const infoPromise = flow.start();
+      const request = (await requestPromise).login_request!;
+      expect(Array.from(request.password)).toEqual(
+        Array.from(challengeResponse('secret', SALT, CHALLENGE)),
+      );
+      harness.send({ login_response: { peer_info: PEER_INFO } });
+      await infoPromise;
+    });
+  });
+
+  it('asks for a password when the configured hash salt does not match', async () => {
+    await withHarness(async (harness) => {
+      const tracker = trackStatuses();
+      harness.send({ hash });
+      const flow = harness.makeFlow(
+        options({
+          password: { hash: H1_SECRET, salt: 'other-salt' },
+          onStatus: tracker.onStatus,
+        }),
+      );
+      const infoPromise = flow.start();
+
+      const prompt = await tracker.waitFor(
+        (event) => event.status === 'password-required',
+      );
+      expect(prompt).toMatchObject({
+        status: 'password-required',
+        retry: false,
+        detail: PASSWORD_SALT_MISMATCH_DETAIL,
+      });
+      await expectNoLoginRequest(harness);
+
+      const requestPromise = harness.next((msg) => Boolean(msg.login_request));
+      flow.login({ hash: H1_SECRET, salt: SALT });
+      const request = (await requestPromise).login_request!;
+      expect(Array.from(request.password)).toEqual(
+        Array.from(challengeResponse('secret', SALT, CHALLENGE)),
+      );
+
+      harness.send({ login_response: { peer_info: PEER_INFO } });
+      await infoPromise;
+    });
+  });
+
+  it('rejects a retry hash with a mismatched salt without sending it', async () => {
+    await withHarness(async (harness) => {
+      const tracker = trackStatuses();
+      harness.send({ hash });
+      const flow = harness.makeFlow(options({ onStatus: tracker.onStatus }));
+      const infoPromise = flow.start();
+      await tracker.waitFor((event) => event.status === 'password-required');
+
+      expectInvalidConfig(() => flow.login({ hash: H1_SECRET, salt: 'other-salt' }));
+      await expectNoLoginRequest(harness);
+
+      const requestPromise = harness.next((msg) => Boolean(msg.login_request));
+      flow.login({ hash: H1_SECRET, salt: SALT });
+      const request = (await requestPromise).login_request!;
+      expect(Array.from(request.password)).toEqual(
+        Array.from(challengeResponse('secret', SALT, CHALLENGE)),
+      );
+      harness.send({ login_response: { peer_info: PEER_INFO } });
+      await infoPromise;
+    });
+  });
+
+  it('rejects a malformed hash and remains usable', async () => {
+    await withHarness(async (harness) => {
+      const tracker = trackStatuses();
+      harness.send({ hash });
+      const flow = harness.makeFlow(options({ onStatus: tracker.onStatus }));
+      const infoPromise = flow.start();
+      await tracker.waitFor((event) => event.status === 'password-required');
+
+      expectInvalidConfig(() => flow.login({ hash: 'not-base64' }));
+      await expectNoLoginRequest(harness);
+
+      const requestPromise = harness.next((msg) => Boolean(msg.login_request));
+      flow.login('secret');
+      const request = (await requestPromise).login_request!;
+      expect(Array.from(request.password)).toEqual(
+        Array.from(challengeResponse('secret', SALT, CHALLENGE)),
+      );
+      harness.send({ login_response: { peer_info: PEER_INFO } });
+      await infoPromise;
     });
   });
 

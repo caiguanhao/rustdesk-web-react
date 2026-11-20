@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  challengeResponse,
+  challengeResponseFromHash,
+  hashPassword,
+} from '../src/crypto/password';
+import { PASSWORD_SALT_MISMATCH_DETAIL } from '../src/session/credentials';
 import { RustDeskError } from '../src/session/errors';
 import type { PermissionEvent } from '../src/session/permissions';
 import type { PeerInfo } from '../src/session/peer-info';
@@ -17,6 +23,7 @@ import {
 import type { RendezvousConnectOptions } from '../src/protocol/connection';
 import type { RemoteClipboardEvent } from '../src/input/clipboard';
 import type { VideoSink } from '../src/media/video-pipeline';
+import { h1Base64 } from './mocks/credentials';
 import {
   DISPLAYS,
   FakeConnection,
@@ -102,6 +109,13 @@ async function connect(harness: Harness): Promise<PeerInfo> {
   completeFakeLogin(harness.connection);
   return promise;
 }
+
+const waitForLoginRequest = async (connection: FakeConnection): Promise<void> => {
+  await waitFor(
+    () => connection.sent.some((message) => Boolean(message.login_request)),
+    1000,
+  );
+};
 
 describe('RustDeskSession', () => {
   it('connects through connecting/securing/authenticating/connected', async () => {
@@ -221,6 +235,214 @@ describe('RustDeskSession', () => {
     await expect(harness.session.login('again')).rejects.toMatchObject({
       code: 'invalid-state',
     });
+  });
+
+  it('rejects password and passwordHash together before opening a socket', async () => {
+    const connectRelay = vi.fn(async () => {
+      throw new Error('should not connect');
+    });
+    const harness = makeHarness({
+      config: {
+        password: 'secret',
+        passwordHash: h1Base64('secret', 'salt'),
+      },
+      deps: { connectRelay },
+    });
+
+    await expect(harness.session.connect()).rejects.toMatchObject({
+      code: 'invalid-config',
+    });
+    expect(connectRelay).not.toHaveBeenCalled();
+    expect(harness.session.status).toBe('error');
+  });
+
+  it('rejects a malformed passwordHash before opening a socket', async () => {
+    const connectRelay = vi.fn(async () => {
+      throw new Error('should not connect');
+    });
+    const harness = makeHarness({
+      config: { password: undefined, passwordHash: 'not-base64' },
+      deps: { connectRelay },
+    });
+
+    await expect(harness.session.connect()).rejects.toMatchObject({
+      code: 'invalid-config',
+    });
+    expect(connectRelay).not.toHaveBeenCalled();
+    expect(harness.session.status).toBe('error');
+  });
+
+  it('connects with a pre-hashed h1 and sends the same wire bytes', async () => {
+    const h1 = h1Base64('secret', 'salt');
+    const harness = makeHarness({
+      config: { password: undefined, passwordHash: { hash: h1, salt: 'salt' } },
+    });
+    const promise = harness.session.connect();
+    harness.connection.push({ hash: { salt: 'salt', challenge: 'challenge' } });
+    await waitForLoginRequest(harness.connection);
+
+    const request = harness.connection.sent.find(
+      (message) => message.login_request,
+    )!.login_request!;
+    expect(Array.from(request.password!)).toEqual(
+      Array.from(challengeResponseFromHash(hashPassword('secret', 'salt'), 'challenge')),
+    );
+    expect(Array.from(request.password!)).toEqual(
+      Array.from(challengeResponse('secret', 'salt', 'challenge')),
+    );
+    expect(
+      harness.statuses.some((event) => event.status === 'password-required'),
+    ).toBe(false);
+
+    harness.connection.push(peerInfoPayload());
+    await promise;
+  });
+
+  it('prompts on an initial hash salt mismatch without sending a login request', async () => {
+    const h1 = h1Base64('secret', 'salt');
+    const harness = makeHarness({
+      config: { password: undefined, passwordHash: { hash: h1, salt: 'other' } },
+    });
+    const promise = harness.session.connect();
+    harness.connection.push({ hash: { salt: 'salt', challenge: 'challenge' } });
+
+    await waitFor(
+      () =>
+        harness.statuses.some(
+          (event) =>
+            event.status === 'password-required' &&
+            event.detail === PASSWORD_SALT_MISMATCH_DETAIL,
+        ),
+      1000,
+    );
+    expect(
+      harness.connection.sent.some((message) => message.login_request),
+    ).toBe(false);
+
+    const login = harness.session.login({ hash: h1, salt: 'salt' });
+    await waitForLoginRequest(harness.connection);
+    harness.connection.push(peerInfoPayload());
+    await login;
+    await promise;
+  });
+
+  it('rejects a retry hash with a mismatched salt and can still log in', async () => {
+    const h1 = h1Base64('secret', 'salt');
+    const harness = makeHarness({ config: { password: undefined } });
+    const promise = harness.session.connect();
+    harness.connection.push({ hash: { salt: 'salt', challenge: 'challenge' } });
+    await waitFor(
+      () =>
+        harness.statuses.some(
+          (event) => event.status === 'password-required',
+        ),
+      1000,
+    );
+
+    await expect(
+      harness.session.login({ hash: h1, salt: 'other' }),
+    ).rejects.toMatchObject({ code: 'invalid-config' });
+    expect(
+      harness.connection.sent.some((message) => message.login_request),
+    ).toBe(false);
+
+    const login = harness.session.login({ hash: h1, salt: 'salt' });
+    await waitForLoginRequest(harness.connection);
+    harness.connection.push(peerInfoPayload());
+    await login;
+    await promise;
+  });
+
+  it('calls serverKeyProvider on every connect and passes each key to connectRelay', async () => {
+    const keys: (string | undefined)[] = [];
+    const connections: FakeConnection[] = [];
+    let calls = 0;
+    const harness = makeHarness({
+      config: {
+        serverKeyProvider: () => {
+          calls += 1;
+          return calls === 1 ? 'key-1' : 'key-2';
+        },
+      },
+      deps: {
+        connectRelay: async (options: RendezvousConnectOptions) => {
+          options.onSecuring?.();
+          keys.push(options.serverKey);
+          const connection = new FakeConnection();
+          connections.push(connection);
+          return connection;
+        },
+      },
+    });
+
+    const first = harness.session.connect();
+    await waitFor(() => connections.length === 1, 1000);
+    completeFakeLogin(connections[0]!);
+    await first;
+
+    harness.session.disconnect();
+    const second = harness.session.connect();
+    await waitFor(() => connections.length === 2, 1000);
+    completeFakeLogin(connections[1]!);
+    await second;
+
+    expect(keys).toEqual(['key-1', 'key-2']);
+  });
+
+  it('aborts while resolving the server key without opening a socket', async () => {
+    const connectRelay = vi.fn(async () => {
+      throw new Error('should not connect');
+    });
+    const harness = makeHarness({
+      config: { serverKeyProvider: () => new Promise<string>(() => {}) },
+      deps: { connectRelay },
+    });
+    const controller = new AbortController();
+    const promise = harness.session.connect(controller.signal);
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ code: 'aborted' });
+    expect(connectRelay).not.toHaveBeenCalled();
+    expect(harness.session.status).toBe('disconnected');
+    expect(harness.errors).toEqual([]);
+  });
+
+  it('fails closed when serverKeyProvider throws', async () => {
+    const connectRelay = vi.fn(async () => {
+      throw new Error('should not connect');
+    });
+    const harness = makeHarness({
+      config: {
+        serverKeyProvider: () => {
+          throw new Error('nope');
+        },
+      },
+      deps: { connectRelay },
+    });
+
+    await expect(harness.session.connect()).rejects.toMatchObject({
+      code: 'server-key-missing',
+    });
+    expect(connectRelay).not.toHaveBeenCalled();
+    expect(harness.session.status).toBe('error');
+  });
+
+  it('fails closed on an invalid serverKeyVerifier before opening a socket', async () => {
+    const connectRelay = vi.fn(async () => {
+      throw new Error('should not connect');
+    });
+    const harness = makeHarness({
+      config: {
+        serverKeyVerifier: { publicKey: 'bad', verifier: 'bad' },
+      },
+      deps: { connectRelay },
+    });
+
+    await expect(harness.session.connect()).rejects.toMatchObject({
+      code: 'server-key-invalid',
+    });
+    expect(connectRelay).not.toHaveBeenCalled();
+    expect(harness.session.status).toBe('error');
   });
 
   it('aborts a pending connect as disconnected without an error event', async () => {

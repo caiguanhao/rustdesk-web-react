@@ -14,7 +14,8 @@
 - React 18/19 是 peerDependency，库不打包 React。
 - 仅 ESM（`import`）；相对源码导入使用 `.js` 后缀的声明由构建产物提供。
 - 库不读取全局配置、环境变量或 localStorage；`server`/`serverKey`/`id`/
-  `password` 全部由宿主传入。密码只在内存中使用。
+  `password`/`passwordHash`/`serverKeyProvider`/`serverKeyVerifier` 全部由宿主传入。
+  密码/h1 只在内存中使用。
 
 ```tsx
 import { RustDeskViewer } from 'rustdesk-web-react';
@@ -41,9 +42,12 @@ import {
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `server` | `string` | 必填 | hbbs 地址，`host` 或 `host:port`。HTTPS 页面且无端口时走 `wss://<host>/ws/id`；带端口时端口 +2（如 `21116` → `21118`）。见[部署](DEPLOYMENT.md)。 |
-| `serverKey` | `string?` | 无 | hbbs Ed25519 公钥（base64）。自建服务器必填；缺失/不匹配默认 fail-closed。 |
+| `serverKey` | `string?` | 无 | hbbs Ed25519 公钥（base64），静态回退。`serverKeyProvider`/`serverKeyVerifier` 优先；缺失/不匹配默认 fail-closed。 |
+| `serverKeyProvider` | `() => string \| undefined \| Promise<string \| undefined>` | 无 | 每次 `connect()` 在打开任何 socket 前调用；非空结果优先。返回空值继续回退，抛错则以 `server-key-missing` fail-closed。hook 通过 ref 读取最新 prop（React 可传 inline）；直接用 `RustDeskSession` 时传稳定函数。 |
+| `serverKeyVerifier` | `{ publicKey: string; verifier: string }` | 无 | 兼容官方 web client verifier 的签名信封。payload 为 `1000::<serverKey>` 或原始 key；验签失败 `server-key-invalid`，不回退 static。**payload 是明文，不是加密**。 |
 | `id` | `string` | 必填 | 被控设备 ID。 |
-| `password` | `string?` | 无 | 设备密码，仅内存。省略时进入 `password-required`，由 viewer 表单或 `onPasswordRequired` 提供。 |
+| `password` | `string?` | 无 | 设备密码，仅内存。省略时进入 `password-required`，由 viewer 表单或 `onPasswordRequired` 提供。与 `passwordHash` 非空时互斥。 |
+| `passwordHash` | `string \| { hash: string; salt?: string }` | 无 | RustDesk h1（base64 的 32 字节 `SHA256(password \|\| salt)`）。库只在本地计算 `SHA256(h1 \|\| challenge)`，不会解密成明文。对象可带 `salt` 与对端 `Hash.salt` 校验。 |
 | `relayServer` | `string?` | 无 | 可选 relay 回退：`RelayResponse.relay_server` 优先；无该字段时使用此值，relay 端口 +2；两者都没有才回退 hbbs +3。 |
 | `rendezvousUrl` | `string?` | 无 | 显式 rendezvous WebSocket URL（mock/非标准反代）。优先于 `server`。 |
 | `relayUrl` | `string?` | 无 | 显式 relay WebSocket URL。优先于其他来源。 |
@@ -55,7 +59,30 @@ import {
 | `allowInsecureFallback` | `boolean?` | `false` | 签名握手失败时是否允许 v1 明文回退；默认失败关闭。开启后会发 `securityDowngraded`。 |
 | `advertiseWebClientVersion` | `boolean?` | `false` | 是否发送官方 web client 的 `version`/`my_platform`（1.3.7/web）；默认不发送以避免对端启用 MultiClipboards 等新行为。 |
 
-`assetBaseUrl` 为空字符串时按默认值处理。密码、server key 不会被库持久化或写日志。
+`assetBaseUrl` 为空字符串时按默认值处理。密码、h1、server key 不会被库持久化或写日志。
+
+### 凭据与 server key 语义
+
+- 密码来源优先级/互斥：
+  - `password` 非空且 `passwordHash` 存在 → `connect()` 前以 `invalid-config` 拒绝。
+  - 仅 `passwordHash` → 使用 h1；裸字符串按 base64 h1 解释，对象是 `{ hash, salt? }`。
+  - 仅 `password` → 现有明文路径。
+  - `password: ''` 视为未提供，可与 `passwordHash` 共存。
+- `passwordHash` 裸字符串只按 **base64 h1** 解释；`onPasswordRequired`/`login`/`connect`
+  的裸字符串仍是 **明文密码**，只有对象才是 h1。
+- h1 不会发到网络，也不会被解密：库只把它与 challenge 做 `SHA256(h1 || challenge)`。
+  h1 是 bearer credential；salt 公开且密码弱时可被离线猜测，不能当作“安全哈希”。
+- 初始 hash 的 salt 与对端 `Hash.salt` 不一致时：发
+  `password-required{retry:false, detail:'Password hash salt mismatch'}`，不发
+  LoginRequest；之后 `login(hash)` 的 salt 仍不一致则抛 `invalid-config`（viewer
+  会回退内置表单）。
+- server key 每次 `connect()` 解析一次，优先级：
+  `serverKeyProvider` 非空结果 → `serverKeyVerifier` → 静态 `serverKey`。
+  provider 返回值非字符串/抛错 → `server-key-missing`；verifier 无效 →
+  `server-key-invalid`（不回退）。解析失败不受 `allowInsecureFallback` 影响。
+- `serverKeyVerifier` 的 publicKey 只有独立 pin/trust 时才是信任锚；若与 verifier
+  由同一认证响应下发，只是编码格式。payload 是明文 `1000::<serverKey>`，浏览器可
+  还原，**不是**对用户隐藏 key 的手段。
 
 ## `<RustDeskViewer>`
 
@@ -71,7 +98,7 @@ import {
 | `showToolbar` | `boolean?` | `true` | 是否显示内置工具栏。 |
 | `labels` | `Partial<RustDeskViewerLabels>?` | 英文默认 | 覆盖任意 UI 字符串。 |
 | `onStatusChange` | `(event: RustDeskStatusEvent) => void` | 无 | 每次状态变化。 |
-| `onPasswordRequired` | `(prompt: PasswordPrompt) => string \| undefined \| Promise<string \| undefined>` | 无 | 返回 password 自动登录；返回 `undefined`/抛错/拒绝则显示内置表单。密码被拒会带 `retry:true` 再次调用。 |
+| `onPasswordRequired` | `(prompt: PasswordPrompt) => RustDeskPasswordCredential \| undefined \| Promise<RustDeskPasswordCredential \| undefined>` | 无 | 返回 string（明文）或 `{ hash, salt? }`（h1）自动登录；返回 `undefined`/抛错/拒绝则显示内置表单。密码被拒会带 `retry:true` 再次调用。 |
 | `onError` | `(error: RustDeskError) => void` | 无 | 所有 session `error` 事件，包括非致命错误（`no-permission` 等）。 |
 | `onClipboard` | `(text: string) => void` | 无 | 已解压的远端文本；自动复制失败也会调用。手动复制按钮由 viewer 显示。 |
 | `onPeerInfo` | `(info: PeerInfo) => void` | 无 | 首次 `peer_info` 及后续显示列表/当前显示更新。 |
@@ -82,15 +109,21 @@ import {
 ```ts
 interface PasswordPrompt {
   retry: boolean;   // 上次密码被拒后为 true
-  error?: string;   // 非敏感详情，如 "Wrong Password"
+  error?: string;   // 非敏感详情，如 "Wrong Password" / "Password hash salt mismatch"
 }
+```
+
+返回的 credential 可以是明文 `string`，也可以是预哈希对象：
+
+```ts
+{ hash: '<base64 32-byte h1>', salt?: '<对端 Hash.salt>' }
 ```
 
 ### Ref
 
 ```ts
 interface RustDeskViewerRef {
-  connect(password?: string): Promise<PeerInfo>;
+  connect(credential?: RustDeskPasswordCredential): Promise<PeerInfo>;
   disconnect(): void;
   sendCtrlAltDel(): void;
   setFullscreen(enabled: boolean): Promise<void>;
@@ -98,9 +131,10 @@ interface RustDeskViewerRef {
 }
 ```
 
-- `connect(password?)`：password 只在 session 已处于 `password-required` 时用于同一
-  Hash 重试；新连接的密码来自 config/`onPasswordRequired`，此参数会被忽略。
-  已有进行中的连接时返回同一个 Promise；session 尚未挂载时以 `invalid-state` 拒绝。
+- `connect(credential?)`：credential 只在 session 已处于 `password-required` 时用于
+  同一 Hash 重试（string=明文，`{ hash, salt? }`=h1）；新连接的凭据来自
+  config/`onPasswordRequired`，此参数会被忽略。已有进行中的连接时返回同一个
+  Promise；session 尚未挂载时以 `invalid-state` 拒绝。
 - `disconnect()`：隐藏密码表单并断开；session 可再次 `connect`。
 - `sendCtrlAltDel()`：仅在已连接、非只读、`PeerInfo.sasEnabled` 且键盘权限允许时发送，否则 no-op。
 - `setFullscreen(enabled)`：调用 renderer 的全屏 API；无 renderer 时 resolve。返回值不表示浏览器是否接受请求（`requestFullscreen` 的 false 被吞掉）。
@@ -151,11 +185,15 @@ Headless React 绑定；与 viewer 共用同一 session 生命周期。
 ### Result
 
 `session`（首帧/卸载后为 `null`）、`status`、`statusEvent`、`peerInfo`、`error`、
-`clipboard`、`permission`、`securityDowngrade`，以及稳定的 `connect(password?)`、
-`login(password)`、`disconnect()`。
+`clipboard`、`permission`、`securityDowngrade`，以及稳定的 `connect(credential?)`、
+`login(credential)`、`disconnect()`。
 
-- `connect(password?)`：无 session 时以 `invalid-state` 拒绝；`password` 且状态为
-  `password-required` 时登录；否则复用进行中的连接或新建连接。
+- `connect(credential?)`：无 session 时以 `invalid-state` 拒绝；`credential` 且状态为
+  `password-required` 时登录；否则复用进行中的连接或新建连接。credential 为
+  `string`（明文）或 `{ hash, salt? }`（h1）。
+- `passwordHash`/`serverKeyVerifier` 的内容（字符串）进入 effect 依赖；相同内容的
+  新对象不会重建 session。`serverKeyProvider` 通过 ref 读取最新 prop，不重建
+  session。
 - session 在 effect 中创建；StrictMode 第一个 effect 的 cleanup 会同步 dispose
   第一个 session（关闭 socket），第二个 effect 新建。配置字段变化会重建 session；
   `readOnly`/`disableClipboard` 实时应用不重连。
@@ -199,7 +237,7 @@ await session.dispose();
 | --- | --- |
 | `on(type, listener)` | 类型化订阅，返回 unsubscribe；listener 异常被吞掉。 |
 | `connect(signal?)` | rendezvous → securing → 登录；在首次 `peer_info` resolve。`disconnected`/`error` 后可重连；active 状态重连以 `invalid-state` 拒绝。dispose 后以 `aborted` 拒绝。 |
-| `login(password)` | 仅在 `password-required` 且持有登录 flow 时有效；复用同一 Hash 返回原 connect Promise。省略 config 密码时不会自动发送空密码 LoginRequest；不要用 `login('')` 代替 click-to-accept，对端可能返回 `Empty Password` 并继续等待。 |
+| `login(credential)` | 仅在 `password-required` 且持有登录 flow 时有效；复用同一 Hash 返回原 connect Promise。credential 为 `string`（明文）或 `{ hash, salt? }`（h1）；salt 不匹配抛 `invalid-config`。省略 config 密码时不会自动发送空密码 LoginRequest；不要用 `login('')` 代替 click-to-accept，对端可能返回 `Empty Password` 并继续等待。 |
 | `disconnect()` | 仅 active 状态生效；发 `disconnected`，关闭连接并清理视频。 |
 | `dispose()` | 幂等异步清理 socket/worker/timer/listener，状态回到 `idle`。 |
 | `setVideoSink(sink \| null)` | 设置/移除画帧接收器；连接中设置会懒加载 VP9 decoder/pipeline 并请求关键帧；null 会按序 dispose pipeline/decoder。 |
@@ -229,7 +267,8 @@ await session.dispose();
 
 正常路径：`connecting` → `securing` → `authenticating` →（3s 后仍等待则
 `awaiting-approval`）→ `connected`。无密码时停在 `password-required`；错误密码为
-`password-required{retry:true, detail:'Wrong Password'}`。致命错误 → `error`；
+`password-required{retry:true, detail:'Wrong Password'}`；初始 h1 的 salt 不匹配为
+`password-required{retry:false, detail:'Password hash salt mismatch'}`。致命错误 → `error`；
 **登录后**对端 `close_reason` → `disconnected`（登录/握手前收到 close_reason 则
 是 `error` + `peer-closed`）；本地断开 → `disconnected`；dispose → `idle`。登录后
 30s 无任何消息以 `timeout` 失败。
@@ -341,7 +380,7 @@ interface PermissionEvent {
 
 | 类别 | 代码 | 含义 |
 | --- | --- | --- |
-| 配置 | `invalid-config` | server/URL/端口/公开 URL 非法，或 HTTPS 页面使用 ws://。 |
+| 配置 | `invalid-config` | server/URL/端口/公开 URL 非法、HTTPS 页面使用 ws://、`password` 与 `passwordHash` 同时非空、h1 非 base64/非 32 字节，或 retry h1 的 salt 不匹配。 |
 | 状态 | `invalid-state` | 在错误状态调用 connect/login（如 active 状态再次 connect、无 flow 时 login）。 |
 | 取消 | `aborted` | AbortSignal/dispose 取消。 |
 | 网络 | `server-unreachable` | hbbs 或 hbbr 的 WebSocket 无法打开（含 TLS/握手前的 HTTP 失败）。 |
@@ -352,8 +391,8 @@ interface PermissionEvent {
 | | `peer-offline` | 对端离线。 |
 | | `unsupported-version` | RelayResponse 缺少版本（服务端/协议版本不受支持）。 |
 | | `message-too-large` | WebSocket close 1009 / 剪贴板超 4 MiB。 |
-| 安全 | `server-key-missing` | 自建服务器未提供 serverKey。 |
-| | `server-key-invalid` | serverKey 无法解析/验签。 |
+| 安全 | `server-key-missing` | 无 serverKey、`serverKeyProvider` 抛错/返回非字符串，或 hbbs 无签名私钥。 |
+| | `server-key-invalid` | 静态 serverKey 或 `serverKeyVerifier` 无法解析/验签/提取 32 字节 key。 |
 | | `peer-signature-invalid` | 对端签名无效。 |
 | | `peer-id-mismatch` | SignedId.id 与目标 ID 不一致。 |
 | | `peer-key-invalid` | 对端公钥格式/长度错误。 |
@@ -384,6 +423,14 @@ interface PermissionEvent {
 - 无密码登录不会发送空密码 LoginRequest，因此 click-to-accept/“No Password
   Access” 需要用户输入任意密码；对端返回 `Empty Password` 时仍停在密码提示。
 - `onStats`/fps/decodeMs 尚未实现；`latencyMs` 可用。
+- `passwordHash`（h1）是 bearer credential：拿到它即可登录该设备，直到密码/salt
+  变化；salt 公开且密码弱时可被离线快速猜测。它防的是明文密码泄露/复用，不是
+  “凭证被盗后不可用”。
+- `serverKeyProvider`/`serverKeyVerifier` 只避免 key 进入静态 bundle 和非授权接口，
+  **不**对浏览器用户隐藏 serverKey；verifier 的 payload 是明文 `1000::<key>`，
+  签名只提供完整性。需要浏览器完全接触不到 key 时，必须使用服务端网关。
+- provider 没有独立超时参数；`connect()` 的 AbortSignal/disconnect 会取消等待，
+  provider 自身仍应设置超时。
 - 真机 iOS/Android 的触摸/软键盘/剪贴板仍需真机验收；自动化测试通过不等于真机
   通过。
 - 复用的 RustDesk 协议/键盘表是 AGPL-3.0（only）；本项目原创代码为

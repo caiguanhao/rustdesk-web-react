@@ -30,9 +30,17 @@ export function RemotePanel() {
   return (
     <RustDeskViewer
       server="rd.example.com"                 // 或 host:21116
-      serverKey="<hbbs base64 公钥>"           // 自建服务器必填
+      // 推荐：连接前从认证 API 取 key，key 不进入静态 bundle。
+      // 也可用静态 serverKey="<hbbs base64 公钥>" 作为回退。
+      serverKeyProvider={async () => {
+        const res = await fetch('/api/rustdesk/key', { credentials: 'include' });
+        return res.ok ? (await res.json()).serverKey : undefined;
+      }}
+      // 也可用签名信封：serverKeyVerifier={{ publicKey, verifier }}（签名编码，不是加密）
       id="123456789"
-      password="<设备密码>"                    // 也可省略，使用内置密码表单
+      // base64(SHA256(password || salt))；也可省略，使用内置密码表单。
+      // 也可继续用 password="<设备密码>"。
+      passwordHash={passwordHash}
       assetBaseUrl="/rustdesk-assets/"
       readOnly={false}
       onStatusChange={(event) => console.log('status', event.status)}
@@ -41,6 +49,10 @@ export function RemotePanel() {
   );
 }
 ```
+
+`passwordHash` 不是明文密码，库只把它当 h1 参与 `SHA256(h1 || challenge)`，不会
+解密/还原；`serverKeyVerifier` 的 payload 是明文 `1000::<serverKey>`，签名只保证
+完整性，浏览器仍可还原 key。需要真正对浏览器隐藏 key 时，只能把连接放到服务端网关。
 
 Headless（自绘 UI）：从 `rustdesk-web-react/core` 导入 `RustDeskSession`；
 `connect`/`setVideoSink`/`on`/`bindInputs` 的完整签名和事件见
@@ -145,6 +157,12 @@ AGPL-3.0 履行。请保留 LICENSE/NOTICE，并按 AGPL §4–§6（修改并�
   `wrong-password`/`two-factor-required`/`too-many-attempts`/`try-later`/
   `blocked`/`no-permission`/`peer-offline`/`peer-error`。mock peer 测试见
   `tests/login.test.ts`。
+- 凭据与运行时 key：`password` 与 `passwordHash` 非空时互斥；`passwordHash` 是
+  32 字节 h1 的 base64（或 `{ hash, salt? }`），只在本地参与
+  `SHA256(h1 || challenge)`，不会发到网络或被解密成明文。`serverKeyProvider`
+  （每次 `connect()` 取 key）优先于 `serverKeyVerifier`（`1000::<key>` 签名信封，
+  payload 是明文，不是加密）和静态 `serverKey`；provider/verifier 解析失败
+  fail-closed。见 [docs/API.md](docs/API.md) 和 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 - `tests/mocks/rustdesk-mock.ts`：一套 Node mock 同时扮演 hbbs、hbbr 和受控端
   （SignedId/PublicKey/Hash/Login、合成 VP9 帧、输入记录），支持 `/ws/id`、
   `/ws/relay` 路径、uuid 配对转发、30s 配对/空闲超时、64KiB/64MiB 消息上限，

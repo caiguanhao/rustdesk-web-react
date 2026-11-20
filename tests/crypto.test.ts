@@ -11,7 +11,11 @@ import {
   sealSecret,
   verifySigned,
 } from '../src/crypto/handshake';
-import { challengeResponse, hashPassword } from '../src/crypto/password';
+import {
+  challengeResponse,
+  challengeResponseFromHash,
+  hashPassword,
+} from '../src/crypto/password';
 
 // P1-4 fixed vectors. Computed once with the exact v1 libsodium-wrappers
 // calls (`verify`/`seal`/`makeOnce`/`encrypt`) and v1's fast-sha256 hash
@@ -92,6 +96,16 @@ describe('password hashing', () => {
     );
     expect(toHex(challengeResponse(PASSWORD, SALT, CHALLENGE))).toBe(
       '2a668d554d6d4d240e8004839582ea6e84501b7e5987b69b5238adf48e3e3256',
+    );
+  });
+
+  it('matches the plaintext wire value when built from a pre-hashed h1', () => {
+    const h1 = hashPassword(PASSWORD, SALT);
+    expect(toHex(challengeResponseFromHash(h1, CHALLENGE))).toBe(
+      '2a668d554d6d4d240e8004839582ea6e84501b7e5987b69b5238adf48e3e3256',
+    );
+    expect(toHex(challengeResponseFromHash(h1, CHALLENGE))).toBe(
+      toHex(challengeResponse(PASSWORD, SALT, CHALLENGE)),
     );
   });
 
