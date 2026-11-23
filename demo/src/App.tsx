@@ -24,9 +24,10 @@ import type {
 } from 'rustdesk-web-react/core';
 
 const env = import.meta.env;
+const STATIC_DEMO = env.VITE_RD_STATIC_DEMO === '1';
 const STORAGE_KEY = 'rustdesk-web-react.demo.form.v1';
-/** Mirrors `DEFAULT_ASSET_BASE_URL`; the viewer applies it when empty. */
-const DEFAULT_ASSET_BASE = '/rustdesk-assets/';
+/** Base-aware default so the Pages subpath loads the copied decoder assets. */
+const DEFAULT_ASSET_BASE = `${env.BASE_URL}rustdesk-assets/`;
 
 type CredentialMode = 'password' | 'hash';
 
@@ -50,13 +51,18 @@ const RustDeskViewer = lazy(() =>
 
 function environmentDefaults(): FormValues {
   return {
-    credentialMode: env.VITE_RD_CREDENTIAL_MODE === 'hash' ? 'hash' : 'password',
+    credentialMode:
+      !STATIC_DEMO && env.VITE_RD_CREDENTIAL_MODE === 'hash'
+        ? 'hash'
+        : 'password',
     server: env.VITE_RD_SERVER ?? '',
     serverKey: env.VITE_RD_KEY ?? '',
-    salt: env.VITE_RD_SALT ?? '',
+    salt: STATIC_DEMO ? '' : env.VITE_RD_SALT ?? '',
     relayServer: env.VITE_RD_RELAY ?? '',
     id: env.VITE_RD_ID ?? '',
-    assetBaseUrl: env.VITE_RD_ASSET_BASE ?? '',
+    assetBaseUrl: STATIC_DEMO
+      ? DEFAULT_ASSET_BASE
+      : env.VITE_RD_ASSET_BASE ?? '',
   };
 }
 
@@ -79,6 +85,7 @@ function decoderSimdFromUrl(): boolean | undefined {
 /** Env values are first-run defaults; later form submissions win. */
 function loadForm(): FormValues {
   const values = environmentDefaults();
+  if (STATIC_DEMO) return values;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return values;
@@ -97,6 +104,7 @@ function loadForm(): FormValues {
 
 /** FIELD_KEYS is the allow-list; the password is not part of FormValues. */
 function saveForm(values: FormValues): void {
+  if (STATIC_DEMO) return;
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -256,17 +264,65 @@ function DemoTextarea({
   );
 }
 
+function StaticDemoPrivacyNotice() {
+  return (
+    <aside
+      className="demo-privacy"
+      role="note"
+      aria-label="Privacy and security"
+    >
+      <p>
+        <strong>Privacy:</strong> This demo runs entirely in your browser, with
+        no backend and no analytics. It does not save any form data: nothing is
+        written to localStorage, sessionStorage, the URL, or logs. Your
+        password is used only in this tab to compute the login response for the
+        RustDesk server you enter and is never sent to us or any third party;
+        the login response goes only to that server and its relay. All fields
+        reset when you reload or close the tab.
+      </p>
+      <p>
+        This page is served over HTTPS, so it can only connect to{' '}
+        <code>wss://</code> endpoints. For <code>ws://</code> LAN servers, run
+        the demo locally. Hash/verifier credential mode requires a host backend
+        and is not available in this public demo.
+      </p>
+      <p>
+        Source (AGPL-3.0):{' '}
+        <a
+          href="https://github.com/caiguanhao/rustdesk-web-react"
+          target="_blank"
+          rel="noreferrer"
+        >
+          github.com/caiguanhao/rustdesk-web-react
+        </a>
+        {' · '}
+        <a href={`${env.BASE_URL}notices/LICENSE`}>LICENSE</a>
+        {' · '}
+        <a href={`${env.BASE_URL}notices/THIRD_PARTY_NOTICES.md`}>
+          third-party notices
+        </a>
+        .
+      </p>
+    </aside>
+  );
+}
+
 export function App() {
   const [form, setForm] = useState<FormValues>(loadForm);
   const [password, setPassword] = useState(
-    () => env.VITE_RD_PASSWORD ?? '',
+    () => (STATIC_DEMO ? '' : env.VITE_RD_PASSWORD ?? ''),
   );
   const [hashCredential, setHashCredential] =
     useState<HashCredential | null>(null);
   const [hashLoading, setHashLoading] = useState(false);
   const [hashError, setHashError] = useState<string | null>(null);
   const [active, setActive] = useState<RustDeskSessionConfig | null>(null);
-  const mode = modeFromValue(form.credentialMode);
+  const mode = STATIC_DEMO ? 'password' : modeFromValue(form.credentialMode);
+  const passwordLabel = STATIC_DEMO
+    ? 'Password (not stored or logged; used only in this browser)'
+    : mode === 'password'
+      ? 'Password (leave empty to use the viewer prompt; not saved)'
+      : 'Password (sent to the demo API to build h1; not saved)';
   const [status, setStatus] = useState<RustDeskStatusEvent>({
     status: 'idle',
   });
@@ -293,6 +349,7 @@ export function App() {
   };
 
   const prepareHashCredential = async (): Promise<void> => {
+    if (STATIC_DEMO) return;
     const values = normalized(form);
     if (!values.serverKey) {
       setHashError('Server Key is required to build the verifier.');
@@ -359,7 +416,14 @@ export function App() {
   const connect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const values = normalized(form);
-    const selectedMode = modeFromValue(values.credentialMode);
+    if (STATIC_DEMO) {
+      values.credentialMode = 'password';
+      values.salt = '';
+      values.assetBaseUrl = DEFAULT_ASSET_BASE;
+    }
+    const selectedMode = STATIC_DEMO
+      ? 'password'
+      : modeFromValue(values.credentialMode);
     if (!values.server || !values.id) {
       setFormError('Server and Device ID are required.');
       return;
@@ -418,6 +482,8 @@ export function App() {
         <p>Embed a RustDesk session in your own React admin.</p>
       </header>
 
+      {STATIC_DEMO ? <StaticDemoPrivacyNotice /> : null}
+
       {active ? (
         <section className="viewer-panel">
           <div className="viewer-head">
@@ -452,27 +518,31 @@ export function App() {
         </section>
       ) : (
         <form className="demo-form" onSubmit={connect}>
-          <label className="demo-field" htmlFor="rd-credential-mode">
-            <span>Credential mode</span>
-            <select
-              id="rd-credential-mode"
-              value={form.credentialMode}
-              onChange={(event) =>
-                update('credentialMode', event.target.value)
-              }
-            >
-              <option value="password">Plaintext password</option>
-              <option value="hash">
-                passwordHash + serverKeyVerifier
-              </option>
-            </select>
-          </label>
+          {STATIC_DEMO ? null : (
+            <label className="demo-field" htmlFor="rd-credential-mode">
+              <span>Credential mode</span>
+              <select
+                id="rd-credential-mode"
+                value={form.credentialMode}
+                onChange={(event) =>
+                  update('credentialMode', event.target.value)
+                }
+              >
+                <option value="password">Plaintext password</option>
+                <option value="hash">
+                  passwordHash + serverKeyVerifier
+                </option>
+              </select>
+            </label>
+          )}
           <DemoField
             id="rd-server"
             label="Server (host:port)"
             value={form.server}
             onChange={(value) => update('server', value)}
-            placeholder="127.0.0.1:12116"
+            placeholder={
+              STATIC_DEMO ? 'your-hbbs.example.com:21116' : '127.0.0.1:12116'
+            }
           />
           <DemoField
             id="rd-server-key"
@@ -486,17 +556,13 @@ export function App() {
           />
           <DemoField
             id="rd-password"
-            label={
-              mode === 'password'
-                ? 'Password (leave empty to use the viewer prompt; not saved)'
-                : 'Password (sent to the demo API to build h1; not saved)'
-            }
+            label={passwordLabel}
             value={password}
             onChange={updatePassword}
             type="password"
             autoComplete="off"
           />
-          {mode === 'hash' ? (
+          {!STATIC_DEMO && mode === 'hash' ? (
             <>
               <DemoField
                 id="rd-salt"
@@ -576,13 +642,15 @@ export function App() {
             value={form.id}
             onChange={(value) => update('id', value)}
           />
-          <DemoField
-            id="rd-asset-base"
-            label="Asset Base URL (same-origin; empty uses the default)"
-            value={form.assetBaseUrl}
-            onChange={(value) => update('assetBaseUrl', value)}
-            placeholder={DEFAULT_ASSET_BASE}
-          />
+          {STATIC_DEMO ? null : (
+            <DemoField
+              id="rd-asset-base"
+              label="Asset Base URL (same-origin; empty uses the default)"
+              value={form.assetBaseUrl}
+              onChange={(value) => update('assetBaseUrl', value)}
+              placeholder={DEFAULT_ASSET_BASE}
+            />
+          )}
 
           {formError ? (
             <p className="demo-error" role="alert">
@@ -595,8 +663,9 @@ export function App() {
               Connect
             </button>
             <span className="demo-note">
-              Non-credential fields are remembered in this browser. The
-              password and fetched hash/verifier are never stored.
+              {STATIC_DEMO
+                ? 'Nothing is saved in this browser; fields reset on reload. The password is never stored.'
+                : 'Non-credential fields are remembered in this browser. The password and fetched hash/verifier are never stored.'}
             </span>
           </div>
         </form>
@@ -608,9 +677,12 @@ export function App() {
           <code>{viewerExample(form, mode, hashCredential)}</code>
         </pre>
         <p className="demo-note">
-          The password stays a placeholder. After “Get passwordHash +
-          serverKeyVerifier”, hash mode shows the fetched values in the snippet;
-          treat that snippet as a credential and do not share it.
+          {STATIC_DEMO
+            ? 'This static demo uses password mode only. The password stays a ' +
+              'placeholder and is not saved.'
+            : 'The password stays a placeholder. After “Get passwordHash + ' +
+              'serverKeyVerifier”, hash mode shows the fetched values in the ' +
+              'snippet; treat that snippet as a credential and do not share it.'}
         </p>
       </section>
     </main>

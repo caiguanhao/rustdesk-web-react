@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 const here = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 
@@ -126,13 +126,27 @@ function credentialApi(): Plugin {
 
 // The demo consumes the library through its public entry points, exactly like
 // a host application would.
-export default defineConfig({
-  root: here('.'),
-  plugins: [react(), credentialApi()],
-  resolve: {
-    alias: [
-      { find: 'rustdesk-web-react/core', replacement: here('../src/core.ts') },
-      { find: 'rustdesk-web-react', replacement: here('../src/index.ts') },
-    ],
-  },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, here('.'), '');
+  const staticDemo = env.VITE_RD_STATIC_DEMO === '1';
+  if (staticDemo && env.VITE_RD_PASSWORD) {
+    throw new Error(
+      'VITE_RD_PASSWORD must not be set for the public static demo',
+    );
+  }
+
+  return {
+    root: here('.'),
+    // Keep normal dev at '/' so Playwright/root-relative pages keep working;
+    // only the static Pages mode uses the repo subpath.
+    base: staticDemo ? env.VITE_RD_BASE || '/' : '/',
+    plugins: staticDemo ? [react()] : [react(), credentialApi()],
+    build: { target: 'es2020' },
+    resolve: {
+      alias: [
+        { find: 'rustdesk-web-react/core', replacement: here('../src/core.ts') },
+        { find: 'rustdesk-web-react', replacement: here('../src/index.ts') },
+      ],
+    },
+  };
 });

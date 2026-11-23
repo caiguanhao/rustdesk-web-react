@@ -19,10 +19,39 @@ part of development. Use a test hbbs/hbbr and a controlled peer, or the
 isolated environment in [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)
 (`npm run dev:server` / `npm run dev:peer`).
 
+## Static demo / GitHub Pages
+
+The public demo at <https://caiguanhao.github.io/rustdesk-web-react/> is built
+with `VITE_RD_STATIC_DEMO=1`:
+
+- password mode only; the hash / `serverKeyVerifier` UI and the
+  `/api/rustdesk/credential` fetch are not available;
+- no backend and no analytics; the demo does not read or write localStorage or
+  sessionStorage, so every field resets on reload;
+- the password is used only in the page to derive the login response for the
+  server entered; it is not stored, logged, or sent to us or any third party;
+- served over HTTPS, so only `wss://` RustDesk endpoints work. Use a TLS-enabled
+  hbbs/hbbr (or a reverse proxy) for the public demo; `ws://` LAN servers need a
+  local demo run.
+
+Build and preview the static artifact:
+
+```bash
+VITE_RD_STATIC_DEMO=1 VITE_RD_BASE=/rustdesk-web-react/ npm run build:demo
+VITE_RD_STATIC_DEMO=1 VITE_RD_BASE=/rustdesk-web-react/ \
+  npx vite preview --config demo/vite.config.ts
+# http://localhost:4173/rustdesk-web-react/
+```
+
+The Pages workflow uploads `demo/dist` and copies `LICENSE`, `NOTICE` and
+`THIRD_PARTY_NOTICES.md` into `demo/dist/notices/`. Static mode rejects a
+build-time `VITE_RD_PASSWORD`.
+
 ## Form and environment
 
 Fields: Credential mode, Server, Server Key, Password, Relay (optional),
-Device ID, Asset Base URL, plus hash-mode fields:
+Device ID, Asset Base URL, plus hash-mode fields. The static Pages build hides
+Credential mode, the hash fields and Asset Base URL:
 
 - **Plaintext password**: password is passed to the viewer directly.
 - **passwordHash + serverKeyVerifier**: enter Password + Password Salt and
@@ -53,8 +82,10 @@ Device ID, Asset Base URL, plus hash-mode fields:
 | `VITE_RD_SALT` | peer `Hash.salt`; copy `salt = "..."` from `RustDesk.toml` (paths above) |
 | `VITE_RD_RELAY` | optional relay override |
 | `VITE_RD_ID` | remote device ID |
-| `VITE_RD_PASSWORD` | optional local password prefill |
-| `VITE_RD_ASSET_BASE` | decoder asset base URL; empty uses the viewer's default `/rustdesk-assets/` |
+| `VITE_RD_PASSWORD` | optional local password prefill; ignored and rejected in static builds |
+| `VITE_RD_ASSET_BASE` | decoder asset base URL; empty uses the viewer's default `/rustdesk-assets/`; ignored in static builds (derived from `VITE_RD_BASE`) |
+| `VITE_RD_STATIC_DEMO` | `1` builds the password-only static demo; disables storage and hash UI |
+| `VITE_RD_BASE` | build base path; `/rustdesk-web-react/` for the Pages project site |
 
 Copy `demo/.env.example` to `demo/.env.local` and edit it locally. The whole
 `demo/.env*` family is gitignored (`demo/.env.example` is the only committed
@@ -68,6 +99,7 @@ password or server key.
   override the `VITE_RD_*` defaults. This includes Server Key and Salt. Clear
   that key in DevTools to go back to the env defaults. The save/load field list
   is one constant; the password and the fetched hash/verifier are outside it.
+  The static Pages demo disables both load and save, so fields reset on reload.
 - The viewer chunk (and its protocol/renderer dependencies) loads on Connect,
   not with the initial form.
 - Password and the fetched hash/verifier are React state only. They are never

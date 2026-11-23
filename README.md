@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README_CN.md)
 
+**Live demo:** [caiguanhao.github.io/rustdesk-web-react](https://caiguanhao.github.io/rustdesk-web-react/)
+
 A lightweight React + TypeScript library that embeds RustDesk remote screen viewing and
 control into an existing React admin application.
 
@@ -149,9 +151,10 @@ Headless (bring your own UI): import `RustDeskSession` from `rustdesk-web-react/
 see [docs/API.md](docs/API.md#rustdesksession) for the full signatures and events of
 `connect`/`setVideoSink`/`on`/`bindInputs`.
 
-Demo (repository checkout only): `npm run dev` opens the form; the `VITE_RD_*` template
-is in `demo/.env.example`, with usage in `demo/README.md`. Do not commit
-`demo/.env.local`.
+Local demo (repository checkout): `npm run dev` opens the form; the `VITE_RD_*`
+template is in `demo/.env.example`, with usage in `demo/README.md`. Do not commit
+`demo/.env.local`. The password-only static demo runs at
+<https://caiguanhao.github.io/rustdesk-web-react/>.
 
 Detailed documentation (currently in Chinese):
 

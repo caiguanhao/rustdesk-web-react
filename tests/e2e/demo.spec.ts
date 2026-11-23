@@ -32,6 +32,8 @@ test('demo form connects and never stores the password', async ({ page }) => {
     // A fresh Playwright context has empty storage; fill every persisted
     // field so env prefills cannot affect the saved-object assertion.
     await page.goto('/');
+    // Stay deterministic if demo/.env.local switches the default mode.
+    await page.selectOption('#rd-credential-mode', 'password');
 
     await page.fill('#rd-server', serverField);
     await page.fill('#rd-server-key', 'test-server-key');
@@ -57,13 +59,15 @@ test('demo form connects and never stores the password', async ({ page }) => {
       (key) => JSON.parse(localStorage.getItem(key) ?? '{}') as unknown,
       STORAGE_KEY,
     );
-    expect(saved).toEqual({
+    expect(saved).toMatchObject({
+      credentialMode: 'password',
       server: serverField,
       serverKey: 'test-server-key',
       relayServer: 'relay.example:21117',
       id: '123456789',
       assetBaseUrl: '/rustdesk-assets/',
     });
+    expect(saved).not.toHaveProperty('password');
     expect(consoleText.join('\n')).not.toContain(PASSWORD);
 
     // Closing the viewer from the demo disposes the session/socket and clears

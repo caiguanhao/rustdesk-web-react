@@ -116,6 +116,11 @@ npm run dev          # demo，http://localhost:5173
 - `npm run build` 不经 `vite-plugin-dts`：先 `vite build` 输出 ESM，再用
   `tsc -p tsconfig.build.json` 只产出 `.d.ts`。
 - demo 通过别名直接引用 `src/`，修改库代码无需先 build。
+- 静态演示（GitHub Pages）：
+  `VITE_RD_STATIC_DEMO=1 VITE_RD_BASE=/rustdesk-web-react/ npm run build:demo`
+  产出 `demo/dist`；静态模式仅密码、无后端 API、不读写
+  localStorage/sessionStorage。`.github/workflows/pages.yml` 在 push 到 `master`
+  时自动部署。
 
 ## 目录
 

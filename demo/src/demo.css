@@ -143,6 +143,30 @@ body {
   color: #ff9a9a;
 }
 
+.demo-privacy {
+  max-width: 760px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid #2f4a3a;
+  border-radius: 6px;
+  background: #121a16;
+  color: #c9d3df;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.demo-privacy p {
+  margin: 0 0 8px;
+}
+
+.demo-privacy p:last-child {
+  margin-bottom: 0;
+}
+
+.demo-privacy a {
+  color: #8ab4f8;
+}
+
 .viewer-panel {
   margin-top: 8px;
 }

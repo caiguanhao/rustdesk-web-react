@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文**
 
+**在线演示：** [caiguanhao.github.io/rustdesk-web-react](https://caiguanhao.github.io/rustdesk-web-react/)
+
 轻量 React + TypeScript 库：把 RustDesk 的远程画面与远程控制嵌入现有 React 后台。
 
 > **非官方项目**：本项目是独立的社区实现，与 RustDesk 官方团队无隶属、赞助或
@@ -134,8 +136,9 @@ Headless（自绘 UI）：从 `rustdesk-web-react/core` 导入 `RustDeskSession`
 `connect`/`setVideoSink`/`on`/`bindInputs` 的完整签名和事件见
 [docs/API.md](docs/API.md#rustdesksession)。
 
-Demo（仅仓库 checkout）：`npm run dev` 打开表单；`VITE_RD_*` 模板见
+本地 Demo（仓库 checkout）：`npm run dev` 打开表单；`VITE_RD_*` 模板见
 `demo/.env.example`，说明见 `demo/README.md`。不要提交 `demo/.env.local`。
+密码模式的静态演示见 <https://caiguanhao.github.io/rustdesk-web-react/>。
 
 详细文档：
 
