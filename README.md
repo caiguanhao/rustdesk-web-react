@@ -12,6 +12,9 @@ control into an existing React admin application.
 > name is used only to describe protocol compatibility; all related trademarks belong
 > to their respective owners.
 
+> **Built with AI**: This project was written with
+> [Claude Code](https://claude.com/claude-code) and DeepSeek-V4.1-Flash-1017.
+
 - The host application supplies `server`, `serverKey`, `id`, and `password`; the library
   itself has no account system or device list.
 - ✅ Supported: video + mouse/keyboard + iOS/Android touch + two-way text clipboard.

@@ -9,6 +9,9 @@
 > **非官方项目**：本项目是独立的社区实现，与 RustDesk 官方团队无隶属、赞助或
 > 背书关系。`RustDesk` 名称仅用于说明协议兼容性，相关商标归其权利人所有。
 
+> **AI 辅助开发**：本项目使用 [Claude Code](https://claude.com/claude-code)
+> 和 DeepSeek-V4.1-Flash-1017 编写。
+
 - 宿主应用提供 `server`、`serverKey`、`id`、`password`；库本身没有账号体系和设备列表。
 - ✅ 支持：视频 + 鼠标/键盘 + iOS/Android 触控 + 双向文本剪贴板。
 - ❌ 不支持：音频、多屏、文件传输。
