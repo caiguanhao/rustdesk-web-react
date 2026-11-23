@@ -1,8 +1,8 @@
 # API 参考
 
-本文覆盖 `rustdesk-web-react` 的公开入口。协议实现细节见 README 的“实现记录”
-与源码；部署/排错见 [DEPLOYMENT.md](DEPLOYMENT.md) 与
-[TROUBLESHOOTING.md](TROUBLESHOOTING.md)。
+本文覆盖 `rustdesk-web-react` 的公开入口。协议实现细节见
+[DEVELOPMENT.md](DEVELOPMENT.md) 的“实现记录”与源码；部署/排错见
+[DEPLOYMENT.md](DEPLOYMENT.md) 与 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。
 
 ## 包入口
 

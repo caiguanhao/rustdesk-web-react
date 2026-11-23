@@ -307,8 +307,7 @@ export function App() {
         'Password Salt is required. Copy salt = "..." from the controlled ' +
           "device's RustDesk.toml: macOS " +
           '~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml; Linux ' +
-          '~/.config/rustdesk/RustDesk.toml (root/service: ' +
-          '/root/.config/rustdesk/RustDesk.toml).',
+          '~/.config/rustdesk/RustDesk.toml.',
       );
       return;
     }
@@ -511,9 +510,7 @@ export function App() {
                     <code>
                       ~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml
                     </code>
-                    ; Linux: <code>~/.config/rustdesk/RustDesk.toml</code>{' '}
-                    (root/service:{' '}
-                    <code>/root/.config/rustdesk/RustDesk.toml</code>).
+                    ; Linux: <code>~/.config/rustdesk/RustDesk.toml</code>.
                   </>
                 }
               />

@@ -16,8 +16,8 @@ npm run dev -- --host 0.0.0.0
 
 Do not point this at the RustDesk client configuration on your own machine as
 part of development. Use a test hbbs/hbbr and a controlled peer, or the
-isolated environment in the root README (`npm run dev:server` / `npm run
-dev:peer`).
+isolated environment in [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)
+(`npm run dev:server` / `npm run dev:peer`).
 
 ## Form and environment
 
@@ -40,7 +40,6 @@ Device ID, Asset Base URL, plus hash-mode fields:
   | --- | --- |
   | macOS | `~/Library/Preferences/com.carriez.RustDesk/RustDesk.toml` |
   | Linux | `~/.config/rustdesk/RustDesk.toml` |
-  | Linux root/service | `/root/.config/rustdesk/RustDesk.toml` |
   | Linux Flatpak | `~/.var/app/com.rustdesk.RustDesk/config/rustdesk/RustDesk.toml` |
   | Windows | `%APPDATA%\RustDesk\config\RustDesk.toml` |
 

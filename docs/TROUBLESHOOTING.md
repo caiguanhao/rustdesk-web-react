@@ -158,5 +158,6 @@ retry detail。UI 由 `tests/rustdesk-viewer.test.tsx` 的 error/disconnected/pa
 4. hbbs/hbbr 日志与端口监听（21116/21118/21117/21119）。
 5. 资源：Network 中 `rustdesk-assets/*` 是否 200，Content-Type 是否正确。
 6. 宿主 CSP/安全头：按[部署](DEPLOYMENT.md#cspworkerwasm)逐项比对。
-7. 仍无法定位时，用本仓库的 mock/隔离 Docker 环境复现（README 的 P1-9 节），
+7. 仍无法定位时，用本仓库的 mock/隔离 Docker 环境复现
+   （[DEVELOPMENT.md](DEVELOPMENT.md) 的 P1-9 节），
    避免连接用户的生产客户端。
