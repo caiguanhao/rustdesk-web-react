@@ -34,6 +34,7 @@ test('demo form connects and never stores the password', async ({ page }) => {
     await page.goto('/');
     // Stay deterministic if demo/.env.local switches the default mode.
     await page.selectOption('#rd-credential-mode', 'password');
+    await page.check('input[name="rd-relay-mode"][value="server"]');
 
     await page.fill('#rd-server', serverField);
     await page.fill('#rd-server-key', 'test-server-key');
@@ -61,6 +62,7 @@ test('demo form connects and never stores the password', async ({ page }) => {
     );
     expect(saved).toMatchObject({
       credentialMode: 'password',
+      relayMode: 'server',
       server: serverField,
       serverKey: 'test-server-key',
       relayServer: 'relay.example:21117',
@@ -89,4 +91,22 @@ test('demo form connects and never stores the password', async ({ page }) => {
     for (const client of server.clients) client.terminate();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('demo relay override switches between server and URL', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#rd-relay')).toBeVisible();
+
+  await page.check('input[name="rd-relay-mode"][value="url"]');
+  await expect(page.locator('#rd-relay-url')).toBeVisible();
+  await expect(page.locator('#rd-relay')).toHaveCount(0);
+
+  await page.fill('#rd-relay-url', 'wss://relay.example/ws/relay');
+  await page.check('input[name="rd-relay-mode"][value="server"]');
+  await expect(page.locator('#rd-relay')).toBeVisible();
+
+  await page.check('input[name="rd-relay-mode"][value="url"]');
+  await expect(page.locator('#rd-relay-url')).toHaveValue(
+    'wss://relay.example/ws/relay',
+  );
 });

@@ -32,7 +32,10 @@ with `VITE_RD_STATIC_DEMO=1`:
   server entered; it is not stored, logged, or sent to us or any third party;
 - served over HTTPS, so only `wss://` RustDesk endpoints work. Use a TLS-enabled
   hbbs/hbbr (or a reverse proxy) for the public demo; `ws://` LAN servers need a
-  local demo run.
+  local demo run;
+- the Relay Server / Relay URL radio stays available, so you can force
+  `wss://<domain>/ws/relay` even when hbbs advertises an IP-based
+  `RelayResponse.relay_server`.
 
 Build and preview the static artifact:
 
@@ -49,10 +52,15 @@ build-time `VITE_RD_PASSWORD`.
 
 ## Form and environment
 
-Fields: Credential mode, Server, Server Key, Password, Relay (optional),
-Device ID, Asset Base URL, plus hash-mode fields. The static Pages build hides
-Credential mode, the hash fields and Asset Base URL:
+Fields: Credential mode, Server, Server Key, Password, Relay override
+(Relay Server or Relay URL), Device ID, Asset Base URL, plus hash-mode fields.
+The static Pages build hides Credential mode, the hash fields and Asset Base
+URL:
 
+- **Relay override**: choose **Relay Server** (fallback; only used when hbbs
+  does not advertise `RelayResponse.relay_server`) or **Relay URL** (explicit
+  `ws(s)://...` endpoint that always wins). Use Relay URL to force the public
+  Pages demo through a TLS relay such as `wss://rd.example.com/ws/relay`.
 - **Plaintext password**: password is passed to the viewer directly.
 - **passwordHash + serverKeyVerifier**: enter Password + Password Salt and
   click **Get passwordHash + serverKeyVerifier**. The Vite dev/preview
@@ -80,7 +88,8 @@ Credential mode, the hash fields and Asset Base URL:
 | `VITE_RD_SERVER` | hbbs host or `host:port` |
 | `VITE_RD_KEY` | hbbs Ed25519 public key (base64), self-hosted |
 | `VITE_RD_SALT` | peer `Hash.salt`; copy `salt = "..."` from `RustDesk.toml` (paths above) |
-| `VITE_RD_RELAY` | optional relay override |
+| `VITE_RD_RELAY` | optional relay server fallback |
+| `VITE_RD_RELAY_URL` | explicit relay URL; overrides `RelayResponse` and `VITE_RD_RELAY`; selects Relay URL mode |
 | `VITE_RD_ID` | remote device ID |
 | `VITE_RD_PASSWORD` | optional local password prefill; ignored and rejected in static builds |
 | `VITE_RD_ASSET_BASE` | decoder asset base URL; empty uses the viewer's default `/rustdesk-assets/`; ignored in static builds (derived from `VITE_RD_BASE`) |

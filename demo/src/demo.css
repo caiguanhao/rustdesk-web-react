@@ -62,6 +62,23 @@ body {
   overflow-wrap: anywhere;
 }
 
+.demo-radio-group {
+  display: grid;
+  gap: 6px;
+}
+
+.demo-radio {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #c9d3df;
+  font-size: 13px;
+}
+
+.demo-radio input {
+  margin: 0;
+}
+
 .demo-field input,
 .demo-field select,
 .demo-field textarea {

@@ -30,13 +30,16 @@ const STORAGE_KEY = 'rustdesk-web-react.demo.form.v1';
 const DEFAULT_ASSET_BASE = `${env.BASE_URL}rustdesk-assets/`;
 
 type CredentialMode = 'password' | 'hash';
+type RelayMode = 'server' | 'url';
 
 const FIELD_KEYS = [
   'credentialMode',
   'server',
   'serverKey',
   'salt',
+  'relayMode',
   'relayServer',
+  'relayUrl',
   'id',
   'assetBaseUrl',
 ] as const;
@@ -58,7 +61,9 @@ function environmentDefaults(): FormValues {
     server: env.VITE_RD_SERVER ?? '',
     serverKey: env.VITE_RD_KEY ?? '',
     salt: STATIC_DEMO ? '' : env.VITE_RD_SALT ?? '',
+    relayMode: env.VITE_RD_RELAY_URL ? 'url' : 'server',
     relayServer: env.VITE_RD_RELAY ?? '',
+    relayUrl: env.VITE_RD_RELAY_URL ?? '',
     id: env.VITE_RD_ID ?? '',
     assetBaseUrl: STATIC_DEMO
       ? DEFAULT_ASSET_BASE
@@ -96,6 +101,7 @@ function loadForm(): FormValues {
       if (typeof value === 'string') values[field] = value;
     }
     values.credentialMode = modeFromValue(values.credentialMode);
+    values.relayMode = values.relayMode === 'url' ? 'url' : 'server';
   } catch {
     // Private mode or a corrupt/old value: fall back to env defaults.
   }
@@ -167,7 +173,11 @@ function viewerExample(
     );
   }
 
-  if (values.relayServer) {
+  if (values.relayMode === 'url') {
+    if (values.relayUrl) {
+      lines.push(`      relayUrl={${JSON.stringify(values.relayUrl)}}`);
+    }
+  } else if (values.relayServer) {
     lines.push(`      relayServer={${JSON.stringify(values.relayServer)}}`);
   }
   lines.push(`      id={${JSON.stringify(id)}}`);
@@ -441,9 +451,13 @@ export function App() {
     setStatus({ status: 'connecting' });
     setPeerInfo(null);
     const decoderSimd = decoderSimdFromUrl();
+    const relayMode: RelayMode =
+      values.relayMode === 'url' ? 'url' : 'server';
     const base = {
       server: values.server,
-      relayServer: optional(values.relayServer),
+      ...(relayMode === 'url'
+        ? { relayUrl: optional(values.relayUrl) }
+        : { relayServer: optional(values.relayServer) }),
       id: values.id,
       assetBaseUrl: optional(values.assetBaseUrl),
       ...(decoderSimd === undefined ? {} : { decoderSimd }),
@@ -629,13 +643,64 @@ export function App() {
               />
             </>
           ) : null}
-          <DemoField
-            id="rd-relay"
-            label="Relay Server (optional)"
-            value={form.relayServer}
-            onChange={(value) => update('relayServer', value)}
-            placeholder="empty uses RelayResponse / hbbs +3"
-          />
+          <div
+            className="demo-field"
+            role="radiogroup"
+            aria-label="Relay override"
+          >
+            <span>Relay override</span>
+            <div className="demo-radio-group">
+              <label className="demo-radio">
+                <input
+                  type="radio"
+                  name="rd-relay-mode"
+                  value="server"
+                  checked={form.relayMode !== 'url'}
+                  onChange={() => update('relayMode', 'server')}
+                />
+                Relay Server (fallback)
+              </label>
+              <label className="demo-radio">
+                <input
+                  type="radio"
+                  name="rd-relay-mode"
+                  value="url"
+                  checked={form.relayMode === 'url'}
+                  onChange={() => update('relayMode', 'url')}
+                />
+                Relay URL (explicit override)
+              </label>
+            </div>
+          </div>
+          {form.relayMode === 'url' ? (
+            <DemoField
+              id="rd-relay-url"
+              label="Relay URL (optional)"
+              value={form.relayUrl}
+              onChange={(value) => update('relayUrl', value)}
+              placeholder="wss://rd.example.com/ws/relay"
+              hint={
+                <>
+                  Always wins over <code>RelayResponse.relay_server</code>.
+                  HTTPS pages require <code>wss://</code>.
+                </>
+              }
+            />
+          ) : (
+            <DemoField
+              id="rd-relay"
+              label="Relay Server (optional)"
+              value={form.relayServer}
+              onChange={(value) => update('relayServer', value)}
+              placeholder="empty uses RelayResponse / hbbs +3"
+              hint={
+                <>
+                  Fallback only; if hbbs advertises{' '}
+                  <code>relay_server</code>, that wins.
+                </>
+              }
+            />
+          )}
           <DemoField
             id="rd-id"
             label="Device ID"
