@@ -73,10 +73,17 @@ body {
   align-items: center;
   color: #c9d3df;
   font-size: 13px;
+  cursor: pointer;
 }
 
-.demo-radio input {
+.demo-radio input[type='radio'] {
+  flex: 0 0 auto;
+  width: auto;
   margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: #3b82f6;
 }
 
 .demo-field input,
